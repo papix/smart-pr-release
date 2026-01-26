@@ -1,0 +1,7 @@
+# actionlint configuration
+# Reference: https://github.com/rhysd/actionlint/blob/main/docs/config.md
+
+self-hosted-runner:
+  labels: []
+
+config-variables: []

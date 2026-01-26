@@ -1,0 +1,58 @@
+# Example workflow for smart-pr-release
+#
+# This workflow creates/updates a release PR when changes are pushed to main.
+# Copy this file to .github/workflows/release-pr.yml and customize as needed.
+
+name: Release PR
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for branch comparison
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Step 1: Collect metadata from merged PRs
+      - name: Collect metadata
+        id: collect
+        uses: papix/smart-pr-release/actions/smart-pr-release-collect@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          base_branch: production
+          head_branch: main
+          include_squashed: true # Enable if using squash merge
+
+      # Step 2: Render PR content with AI summary
+      - name: Render PR content
+        id: render
+        uses: papix/smart-pr-release/actions/smart-pr-release-render@v1
+        with:
+          template_path: .github/release-template.md.eta
+          provider: openai
+          api_key: ${{ secrets.OPENAI_API_KEY }}
+          output_language: ja
+
+      # Step 3: Create or update release PR
+      - name: Create/Update PR
+        uses: papix/smart-pr-release/actions/smart-pr-release-create@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          base_branch: production
+          head_branch: main
+          title: ${{ steps.render.outputs.title }}
+          body: ${{ steps.render.outputs.body }}
+          labels: release,automated
+          existing_pr_number: ${{ steps.collect.outputs.existing_pr_number }}

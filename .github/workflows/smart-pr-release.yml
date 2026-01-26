@@ -1,0 +1,155 @@
+name: Smart PR Release
+
+on:
+  workflow_call:
+    inputs:
+      base_branch:
+        description: 'Base branch name (target branch for release)'
+        type: string
+        default: 'production'
+      head_branch:
+        description: 'Head branch name (source branch for release)'
+        type: string
+        default: 'main'
+      ai_provider:
+        description: 'AI provider (openai or none)'
+        type: string
+        default: 'none'
+      ai_model:
+        description: 'AI model name (optional, uses provider default if empty)'
+        type: string
+        default: ''
+      ai_temperature:
+        description: 'AI temperature (0.0-2.0)'
+        type: string
+        default: '0.2'
+      output_language:
+        description: 'Output language for AI summary (e.g., ja, en)'
+        type: string
+        default: 'ja'
+      release_label:
+        description: 'Label to add to release PR'
+        type: string
+        default: 'release'
+      template_path:
+        description: 'Path to release template (in caller repo)'
+        type: string
+        default: '.github/release-template.md'
+    secrets:
+      OPENAI_API_KEY:
+        required: false
+        description: 'OpenAI API key (required if ai_provider is openai)'
+    outputs:
+      pr_number:
+        description: 'Release PR number'
+        value: ${{ jobs.smart-pr-release.outputs.pr_number }}
+      pr_url:
+        description: 'Release PR URL'
+        value: ${{ jobs.smart-pr-release.outputs.pr_url }}
+      created:
+        description: 'Whether a new PR was created (true) or existing PR updated (false)'
+        value: ${{ jobs.smart-pr-release.outputs.created }}
+
+permissions: {}
+
+concurrency:
+  group: smart-pr-release-${{ github.repository }}-${{ inputs.base_branch }}
+  cancel-in-progress: false
+
+jobs:
+  smart-pr-release:
+    name: Smart PR Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      pr_number: ${{ steps.create.outputs.pr_number }}
+      pr_url: ${{ steps.create.outputs.pr_url }}
+      created: ${{ steps.create.outputs.created }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout smart-pr-release
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: papix/smart-pr-release
+          path: .smart-pr-release-action
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: .smart-pr-release-action/pnpm-lock.yaml
+
+      - name: Install smart-pr-release dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: .smart-pr-release-action
+
+      - name: Restore PR cache
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+        with:
+          path: .smart-pr-release/cache
+          key: smart-pr-release-cache-${{ github.repository }}-${{ inputs.base_branch }}
+
+      # Step 1: Collect metadata from branch comparison
+      - name: Collect Release Metadata
+        id: collect
+        uses: ./.smart-pr-release-action/actions/smart-pr-release-collect
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          base_branch: ${{ inputs.base_branch }}
+          head_branch: ${{ inputs.head_branch }}
+
+      # Step 2: Render PR title and body from template
+      - name: Render Release PR
+        id: render
+        uses: ./.smart-pr-release-action/actions/smart-pr-release-render
+        with:
+          template_path: ${{ inputs.template_path }}
+          metadata_path: .smart-pr-release/metadata.json
+          provider: ${{ inputs.ai_provider }}
+          api_key: ${{ secrets.OPENAI_API_KEY }}
+          model: ${{ inputs.ai_model }}
+          temperature: ${{ inputs.ai_temperature }}
+          output_language: ${{ inputs.output_language }}
+
+      # Step 3: Create or update release PR
+      - name: Create or Update Release PR
+        id: create
+        uses: ./.smart-pr-release-action/actions/smart-pr-release-create
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          base_branch: ${{ inputs.base_branch }}
+          head_branch: ${{ inputs.head_branch }}
+          title: ${{ steps.render.outputs.title }}
+          body: ${{ steps.render.outputs.body }}
+          existing_pr_number: ${{ steps.collect.outputs.existing_pr_number }}
+
+      - name: Add release label
+        if: steps.create.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_LABEL: ${{ inputs.release_label }}
+          PR_NUMBER: ${{ steps.create.outputs.pr_number }}
+        run: |
+          gh label create "$RELEASE_LABEL" --color "0e8a16" --description "Release PR" --force
+          gh pr edit "$PR_NUMBER" --add-label "$RELEASE_LABEL"
+
+      - name: Upload AI audit log
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: smart-pr-release-audit
+          path: .smart-pr-release/audit.json
+          if-no-files-found: ignore

@@ -1,0 +1,45 @@
+{
+  "name": "@papix/smart-pr-release-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "CLI tool for smart-pr-release",
+  "license": "MIT",
+  "author": "papix",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/papix/smart-pr-release.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/papix/smart-pr-release/tree/main/packages/cli",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "keywords": [
+    "release",
+    "github",
+    "automation",
+    "ai",
+    "openai",
+    "cli",
+    "pull-request"
+  ],
+  "bin": {
+    "smart-pr-release": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsup"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "dotenv": "^16.5.0"
+  }
+}

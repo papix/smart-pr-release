@@ -1,0 +1,70 @@
+{
+  "name": "smart-pr-release",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "AI-powered release PR automation for GitHub",
+  "license": "MIT",
+  "author": "papix",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.9.0",
+    "pnpm": ">=9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/papix/smart-pr-release.git"
+  },
+  "imports": {
+    "#core/*": "./packages/core/src/*"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome lint --write .",
+    "format": "biome format --write .",
+    "check": "biome check --write .",
+    "check:ci": "biome check .",
+    "knip": "knip",
+    "secretlint": "secretlint \"**/*\"",
+    "publint": "pnpm -r exec publint",
+    "attw": "pnpm --filter @papix/smart-pr-release-core exec attw --pack --profile node16 --ignore-rules cjs-resolves-to-esm",
+    "prepare": "husky",
+    "prepublishOnly": "pnpm run typecheck && pnpm test",
+    "cli": "tsx packages/cli/src/index.ts"
+  },
+  "lint-staged": {
+    "*.{ts,js,json,jsonc}": [
+      "biome check --write --files-ignore-unknown=true --no-errors-on-unmatched --error-on-warnings"
+    ],
+    "*": [
+      "secretlint"
+    ]
+  },
+  "devDependencies": {
+    "@actions/core": "^2.0.2",
+    "@arethetypeswrong/cli": "^0.18.2",
+    "@biomejs/biome": "^2.3.12",
+    "@commitlint/cli": "^20.3.1",
+    "@commitlint/config-conventional": "^20.3.1",
+    "@commitlint/types": "^20.3.1",
+    "@types/node": "^22.15.32",
+    "@vitest/coverage-v8": "^4.0.18",
+    "dayjs": "^1.11.13",
+    "husky": "^9.1.7",
+    "knip": "^5.61.2",
+    "lint-staged": "^16.2.7",
+    "openai": "^4.104.0",
+    "@secretlint/secretlint-rule-preset-recommend": "^11.3.0",
+    "publint": "^0.3.12",
+    "secretlint": "^11.3.0",
+    "tsup": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.3",
+    "vite-tsconfig-paths": "^6.0.5",
+    "vitest": "^4.0.18"
+  }
+}

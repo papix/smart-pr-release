@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+actions/*/dist/
+packages/*/dist/
+
+# Coverage
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# npm lock file (using pnpm)
+package-lock.json
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+tmp/
+temp/
+
+# Smart PR Release output (cache, metadata, audit logs)
+.smart-pr-release/
+
+# AI Coding Tools
+CLAUDE.local.md
+.claude/settings.local.json
+.mcp.json

@@ -1,0 +1,55 @@
+name: 'Collect Release Metadata'
+description: 'Collect metadata from branch comparison including all PRs, files, and commits'
+author: 'papix'
+
+inputs:
+  github_token:
+    description: 'GitHub token for API access'
+    required: true
+  base_branch:
+    description: 'Base branch (e.g., production)'
+    required: false
+    default: 'production'
+  head_branch:
+    description: 'Head branch (e.g., main)'
+    required: false
+    default: 'main'
+  output_path:
+    description: 'Path to write the metadata JSON file'
+    required: false
+    default: '.smart-pr-release/metadata.json'
+  cache_path:
+    description: 'Path to the PR cache file'
+    required: false
+    default: '.smart-pr-release/cache/pr-cache.json'
+  include_squashed:
+    description: 'Include squash merged PRs (detect from commit messages)'
+    required: false
+    default: 'false'
+
+outputs:
+  metadata_path:
+    description: 'Path to the generated metadata file'
+    value: ${{ inputs.output_path }}
+  existing_pr_number:
+    description: 'Existing release PR number (empty if none)'
+    value: ${{ steps.collect.outputs.existing_pr_number }}
+  pr_numbers:
+    description: 'Comma-separated list of PR numbers in the release'
+    value: ${{ steps.collect.outputs.pr_numbers }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Collect Release Metadata
+      id: collect
+      shell: bash
+      working-directory: ${{ github.action_path }}/../..
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        RELEASE_BASE: ${{ inputs.base_branch }}
+        RELEASE_HEAD: ${{ inputs.head_branch }}
+        RELEASE_METADATA_PATH: ${{ inputs.output_path }}
+        RELEASE_CACHE_PATH: ${{ inputs.cache_path }}
+        RELEASE_INCLUDE_SQUASHED: ${{ inputs.include_squashed }}
+      run: pnpm exec tsx ${{ github.action_path }}/src/index.ts

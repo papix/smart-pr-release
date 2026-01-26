@@ -1,0 +1,70 @@
+{
+  "name": "@papix/smart-pr-release-core",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Core library for smart-pr-release",
+  "license": "MIT",
+  "author": "papix",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/papix/smart-pr-release.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/papix/smart-pr-release/tree/main/packages/core",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "keywords": [
+    "release",
+    "github",
+    "automation",
+    "ai",
+    "openai",
+    "pull-request"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./github-api": {
+      "types": "./dist/github-api.d.ts",
+      "import": "./dist/github-api.js"
+    },
+    "./mask-sensitive": {
+      "types": "./dist/mask-sensitive.d.ts",
+      "import": "./dist/mask-sensitive.js"
+    },
+    "./template": {
+      "types": "./dist/template.d.ts",
+      "import": "./dist/template.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
+    },
+    "./cli-types": {
+      "types": "./dist/cli-types.d.ts",
+      "import": "./dist/cli-types.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup"
+  },
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "eta": "^3.5.0"
+  },
+  "devDependencies": {
+    "yaml": "^2.8.2"
+  }
+}

@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+
+pnpm check:ci && pnpm knip && pnpm test

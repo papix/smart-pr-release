@@ -1,0 +1,66 @@
+name: 'Render Release PR'
+description: 'Render release PR title and body from template and metadata'
+author: 'papix'
+
+inputs:
+  template_path:
+    description: 'Path to release template file'
+    required: false
+    default: '.github/release-template.md'
+  metadata_path:
+    description: 'Path to the metadata JSON file'
+    required: false
+    default: '.smart-pr-release/metadata.json'
+  provider:
+    description: 'AI provider (openai or none)'
+    required: false
+    default: 'none'
+  api_key:
+    description: 'API key for the AI provider'
+    required: false
+    default: ''
+  model:
+    description: 'Model name (e.g., gpt-5-mini)'
+    required: false
+    default: ''
+  temperature:
+    description: 'Temperature for generation (0.0-2.0)'
+    required: false
+    default: '0.2'
+  base_url:
+    description: 'Base URL for API (OpenAI only)'
+    required: false
+    default: ''
+  output_language:
+    description: 'Output language for AI summary (e.g., ja, en)'
+    required: false
+    default: 'ja'
+
+outputs:
+  title:
+    description: 'Generated PR title'
+    value: ${{ steps.render.outputs.title }}
+  body:
+    description: 'Generated PR body'
+    value: ${{ steps.render.outputs.body }}
+  audit_path:
+    description: 'Path to the audit log file'
+    value: '.smart-pr-release/audit.json'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Render Release PR
+      id: render
+      shell: bash
+      working-directory: ${{ github.action_path }}/../..
+      env:
+        RELEASE_TEMPLATE_PATH: ${{ inputs.template_path }}
+        RELEASE_METADATA_PATH: ${{ inputs.metadata_path }}
+        AI_PROVIDER: ${{ inputs.provider }}
+        AI_API_KEY: ${{ inputs.api_key }}
+        AI_MODEL: ${{ inputs.model }}
+        AI_TEMPERATURE: ${{ inputs.temperature }}
+        AI_BASE_URL: ${{ inputs.base_url }}
+        RELEASE_OUTPUT_LANGUAGE: ${{ inputs.output_language }}
+      run: pnpm exec tsx ${{ github.action_path }}/src/index.ts

@@ -1,0 +1,58 @@
+name: 'Release PR Create'
+description: 'Create or update release PR'
+author: 'papix'
+
+inputs:
+  github_token:
+    description: 'GitHub token for API access'
+    required: true
+  base_branch:
+    description: 'Base branch (e.g., production)'
+    required: false
+    default: 'production'
+  head_branch:
+    description: 'Head branch (e.g., main)'
+    required: false
+    default: 'main'
+  title:
+    description: 'PR title'
+    required: true
+  body:
+    description: 'PR body'
+    required: true
+  existing_pr_number:
+    description: 'Existing PR number to update (empty to create new)'
+    required: false
+    default: ''
+  labels:
+    description: 'Comma-separated labels to add to the PR'
+    required: false
+    default: ''
+
+outputs:
+  pr_number:
+    description: 'Created/updated PR number'
+    value: ${{ steps.create.outputs.pr_number }}
+  pr_url:
+    description: 'PR URL'
+    value: ${{ steps.create.outputs.pr_url }}
+  created:
+    description: 'Whether a new PR was created (true) or existing PR updated (false)'
+    value: ${{ steps.create.outputs.created }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create or Update Release PR
+      id: create
+      shell: bash
+      working-directory: ${{ github.action_path }}/../..
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        RELEASE_BASE: ${{ inputs.base_branch }}
+        RELEASE_HEAD: ${{ inputs.head_branch }}
+        RELEASE_TITLE: ${{ inputs.title }}
+        RELEASE_BODY: ${{ inputs.body }}
+        RELEASE_EXISTING_PR_NUMBER: ${{ inputs.existing_pr_number }}
+        RELEASE_LABELS: ${{ inputs.labels }}
+      run: pnpm exec tsx ${{ github.action_path }}/src/index.ts

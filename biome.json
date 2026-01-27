@@ -26,6 +26,21 @@
       "correctness": {
         "noUnusedVariables": "error",
         "noUnusedImports": "error"
+      },
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": {
+            "maxAllowedComplexity": 15
+          }
+        },
+        "noForEach": "error"
+      },
+      "style": {
+        "noParameterAssign": "error"
+      },
+      "performance": {
+        "noAccumulatingSpread": "error"
       }
     }
   },
@@ -44,6 +59,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "maxSize": 1048576
+    "maxSize": 1048576,
+    "includes": ["**/*.{js,mjs,cjs,ts,mts,json,jsonc}"]
   }
 }

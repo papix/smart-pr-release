@@ -193,6 +193,216 @@ function cleanupCache(cache: PRCache, validPrNumbers: Set<number>): PRCache {
   return tempCache
 }
 
+interface FileAnalysisResult {
+  hasEnvFiles: boolean
+  hasCredentialFiles: boolean
+  hasSecretFiles: boolean
+  hasMigrationFiles: boolean
+}
+
+function analyzeFile(filename: string, extensionCounts: Record<string, number>): FileAnalysisResult {
+  const lowerPath = filename.toLowerCase()
+  const baseName = path.posix.basename(lowerPath)
+
+  const envFile = isEnvFile(baseName)
+  const credentialsFile = isCredentialsFile(baseName)
+  const secretFile = isSecretFile(lowerPath)
+  const migrationFile = isMigrationFile(lowerPath, baseName)
+
+  if (!envFile && !credentialsFile && !secretFile) {
+    bumpExtension(extensionCounts, normalizeExtension(baseName))
+  }
+
+  return {
+    hasEnvFiles: envFile,
+    hasCredentialFiles: credentialsFile,
+    hasSecretFiles: secretFile,
+    hasMigrationFiles: migrationFile,
+  }
+}
+
+function mergeFileAnalysis(
+  target: { hasEnvFiles: boolean; hasCredentialFiles: boolean; hasSecretFiles: boolean; hasMigrationFiles: boolean },
+  result: FileAnalysisResult,
+): void {
+  if (result.hasEnvFiles) target.hasEnvFiles = true
+  if (result.hasCredentialFiles) target.hasCredentialFiles = true
+  if (result.hasSecretFiles) target.hasSecretFiles = true
+  if (result.hasMigrationFiles) target.hasMigrationFiles = true
+}
+
+interface ProcessPRCacheHitParams {
+  cachedEntry: PRCacheEntry
+  extensionCounts: Record<string, number>
+  commitMessages: Set<string>
+  fileFlags: { hasEnvFiles: boolean; hasCredentialFiles: boolean; hasSecretFiles: boolean; hasMigrationFiles: boolean }
+}
+
+interface ProcessPRCacheHitResult {
+  detail: PullRequestDetail
+  additions: number
+  deletions: number
+  changedFiles: number
+}
+
+function processPRCacheHit(prNum: number, params: ProcessPRCacheHitParams): ProcessPRCacheHitResult {
+  const { cachedEntry, extensionCounts, commitMessages, fileFlags } = params
+  const { data } = cachedEntry
+
+  for (const filename of data.files) {
+    const result = analyzeFile(filename, extensionCounts)
+    mergeFileAnalysis(fileFlags, result)
+  }
+
+  for (const commit of data.commits) {
+    const message = commit.message.split('\n')[0]?.trim()
+    if (message) {
+      commitMessages.add(maskSensitive(message).masked)
+    }
+  }
+
+  return {
+    detail: {
+      number: prNum,
+      title: data.title,
+      author: data.author,
+      labels: data.labels,
+      url: data.url,
+      description: data.description,
+      additions: data.additions,
+      deletions: data.deletions,
+      changedFiles: data.changedFiles,
+    },
+    additions: data.additions,
+    deletions: data.deletions,
+    changedFiles: data.changedFiles,
+  }
+}
+
+interface FilesProcessResult {
+  files: string[]
+}
+
+async function processFilesForPR(
+  client: GitHubClient,
+  prNum: number,
+  extensionCounts: Record<string, number>,
+  fileFlags: { hasEnvFiles: boolean; hasCredentialFiles: boolean; hasSecretFiles: boolean; hasMigrationFiles: boolean },
+): Promise<FilesProcessResult> {
+  const filesResponse = await client.getPullRequestFiles(prNum)
+  const files: string[] = []
+  for (const file of filesResponse) {
+    if (!file.filename) continue
+    files.push(file.filename)
+    const result = analyzeFile(file.filename, extensionCounts)
+    mergeFileAnalysis(fileFlags, result)
+  }
+  return { files }
+}
+
+async function processCommitsForPR(
+  client: GitHubClient,
+  prNum: number,
+  commitMessages: Set<string>,
+): Promise<CommitInfo[]> {
+  const commitsResponse = await client.getPullRequestCommits(prNum)
+  const commits: CommitInfo[] = []
+  for (const commit of commitsResponse) {
+    const message = commit.commit?.message?.trim()
+    const sha = (commit as { sha?: string }).sha || ''
+    if (message && sha) {
+      const maskedMessage = maskSensitive(message).masked
+      commits.push({ sha, message: maskedMessage })
+      const firstLine = maskedMessage.split('\n')[0]?.trim()
+      if (firstLine) {
+        commitMessages.add(firstLine)
+      }
+    }
+  }
+  return commits
+}
+
+function extractLabelNames(labels: Array<{ name?: string }>): string[] {
+  return labels.map((label) => label.name).filter((name): name is string => typeof name === 'string' && name.length > 0)
+}
+
+function extractPRDescription(body: string | null | undefined): string | null {
+  if (body && body.trim().length > 0) {
+    return maskSensitive(body.trim()).masked
+  }
+  return null
+}
+
+interface ProcessPRCacheMissParams {
+  client: GitHubClient
+  prDetail: Awaited<ReturnType<GitHubClient['getPullRequest']>>
+  extensionCounts: Record<string, number>
+  commitMessages: Set<string>
+  fileFlags: { hasEnvFiles: boolean; hasCredentialFiles: boolean; hasSecretFiles: boolean; hasMigrationFiles: boolean }
+  cache: PRCache
+  updatedAt: string
+  headSha: string
+}
+
+interface ProcessPRCacheMissResult {
+  detail: PullRequestDetail
+  additions: number
+  deletions: number
+  changedFiles: number
+}
+
+async function processPRCacheMiss(prNum: number, params: ProcessPRCacheMissParams): Promise<ProcessPRCacheMissResult> {
+  const { client, prDetail, extensionCounts, commitMessages, fileFlags, cache, updatedAt, headSha } = params
+
+  const title = maskSensitive(prDetail.title || '').masked
+  const author = prDetail.user?.login || 'unknown'
+  const labels = Array.isArray(prDetail.labels) ? prDetail.labels : []
+  const additions = typeof prDetail.additions === 'number' ? prDetail.additions : 0
+  const deletions = typeof prDetail.deletions === 'number' ? prDetail.deletions : 0
+  const changedFiles = typeof prDetail.changed_files === 'number' ? prDetail.changed_files : 0
+
+  const { files } = await processFilesForPR(client, prNum, extensionCounts, fileFlags)
+  const commits = await processCommitsForPR(client, prNum, commitMessages)
+  const description = extractPRDescription(prDetail.body)
+  const labelNames = extractLabelNames(labels)
+
+  cache.entries[prNum] = {
+    number: prNum,
+    updatedAt,
+    headSha,
+    data: {
+      title,
+      author,
+      labels: labelNames,
+      url: prDetail.html_url,
+      description,
+      additions,
+      deletions,
+      changedFiles,
+      files,
+      commits,
+    },
+    cachedAt: new Date().toISOString(),
+  }
+
+  return {
+    detail: {
+      number: prNum,
+      title,
+      author,
+      labels: labelNames,
+      url: prDetail.html_url,
+      description,
+      additions,
+      deletions,
+      changedFiles,
+    },
+    additions,
+    deletions,
+    changedFiles,
+  }
+}
+
 /**
  * Extract PR numbers from merge commits between base and head
  */
@@ -317,10 +527,12 @@ export async function collectMetadata(options: CollectMetadataOptions): Promise<
   let totalAdditions = 0
   let totalDeletions = 0
   let totalChangedFiles = 0
-  let hasEnvFiles = false
-  let hasCredentialFiles = false
-  let hasSecretFiles = false
-  let hasMigrationFiles = false
+  const fileFlags = {
+    hasEnvFiles: false,
+    hasCredentialFiles: false,
+    hasSecretFiles: false,
+    hasMigrationFiles: false,
+  }
 
   // Track cache stats
   let cacheHits = 0
@@ -329,159 +541,39 @@ export async function collectMetadata(options: CollectMetadataOptions): Promise<
   // Collect details for each PR
   const detailedPrs: PullRequestDetail[] = await Promise.all(
     prNumbers.map(async (prNum) => {
-      // Get PR metadata for cache validation
       const prDetail = await client.getPullRequest(prNum)
       const updatedAt = prDetail.updated_at || ''
       const headSha = prDetail.head?.sha || ''
-      const title = maskSensitive(prDetail.title || '').masked
-      const author = prDetail.user?.login || 'unknown'
 
-      // Check cache validity
       const cachedEntry = cache.entries[prNum]
       if (cachedEntry && isCacheValid(cachedEntry, updatedAt, headSha)) {
         cacheHits++
         core.info(`  PR #${prNum}: cache hit`)
 
-        // Use cached data
-        const { data } = cachedEntry
-        totalAdditions += data.additions
-        totalDeletions += data.deletions
-        totalChangedFiles += data.changedFiles
-
-        // Process files for extension counting
-        for (const filename of data.files) {
-          const lowerPath = filename.toLowerCase()
-          const baseName = path.posix.basename(lowerPath)
-
-          const envFile = isEnvFile(baseName)
-          const credentialsFile = isCredentialsFile(baseName)
-          const secretFile = isSecretFile(lowerPath)
-          const migrationFile = isMigrationFile(lowerPath, baseName)
-
-          if (envFile) hasEnvFiles = true
-          if (credentialsFile) hasCredentialFiles = true
-          if (secretFile) hasSecretFiles = true
-          if (migrationFile) hasMigrationFiles = true
-
-          if (envFile || credentialsFile || secretFile) continue
-          bumpExtension(extensionCounts, normalizeExtension(baseName))
-        }
-
-        // Process commits for messages
-        for (const commit of data.commits) {
-          const message = commit.message.split('\n')[0]?.trim()
-          if (message) {
-            commitMessages.add(maskSensitive(message).masked)
-          }
-        }
-
-        return {
-          number: prNum,
-          title: data.title,
-          author: data.author,
-          labels: data.labels,
-          url: data.url,
-          description: data.description,
-          additions: data.additions,
-          deletions: data.deletions,
-          changedFiles: data.changedFiles,
-        }
+        const result = processPRCacheHit(prNum, { cachedEntry, extensionCounts, commitMessages, fileFlags })
+        totalAdditions += result.additions
+        totalDeletions += result.deletions
+        totalChangedFiles += result.changedFiles
+        return result.detail
       }
 
-      // Cache miss - fetch full data
       cacheMisses++
       core.info(`  PR #${prNum}: cache miss, fetching details`)
 
-      const labels = Array.isArray(prDetail.labels) ? prDetail.labels : []
-      const additions = typeof prDetail.additions === 'number' ? prDetail.additions : 0
-      const deletions = typeof prDetail.deletions === 'number' ? prDetail.deletions : 0
-      const changedFiles = typeof prDetail.changed_files === 'number' ? prDetail.changed_files : 0
-
-      totalAdditions += additions
-      totalDeletions += deletions
-      totalChangedFiles += changedFiles
-
-      // Get files for extension counting
-      const filesResponse = await client.getPullRequestFiles(prNum)
-      const files: string[] = []
-      for (const file of filesResponse) {
-        if (!file.filename) continue
-        files.push(file.filename)
-        const lowerPath = file.filename.toLowerCase()
-        const baseName = path.posix.basename(lowerPath)
-
-        const envFile = isEnvFile(baseName)
-        const credentialsFile = isCredentialsFile(baseName)
-        const secretFile = isSecretFile(lowerPath)
-        const migrationFile = isMigrationFile(lowerPath, baseName)
-
-        if (envFile) hasEnvFiles = true
-        if (credentialsFile) hasCredentialFiles = true
-        if (secretFile) hasSecretFiles = true
-        if (migrationFile) hasMigrationFiles = true
-
-        if (envFile || credentialsFile || secretFile) continue
-        bumpExtension(extensionCounts, normalizeExtension(baseName))
-      }
-
-      // Get commits for messages (all commits, no limit)
-      const commitsResponse = await client.getPullRequestCommits(prNum)
-      const commits: CommitInfo[] = []
-      for (const commit of commitsResponse) {
-        const message = commit.commit?.message?.trim()
-        const sha = (commit as { sha?: string }).sha || ''
-        if (message && sha) {
-          // Mask sensitive info before caching
-          const maskedMessage = maskSensitive(message).masked
-          commits.push({ sha, message: maskedMessage })
-          const firstLine = maskedMessage.split('\n')[0]?.trim()
-          if (firstLine) {
-            commitMessages.add(firstLine)
-          }
-        }
-      }
-
-      // Prepare description (no truncation)
-      let description: string | null = null
-      if (prDetail.body && prDetail.body.trim().length > 0) {
-        description = maskSensitive(prDetail.body.trim()).masked
-      }
-
-      const labelNames = labels
-        .map((label) => label.name)
-        .filter((name): name is string => typeof name === 'string' && name.length > 0)
-
-      // Update cache entry
-      cache.entries[prNum] = {
-        number: prNum,
+      const result = await processPRCacheMiss(prNum, {
+        client,
+        prDetail,
+        extensionCounts,
+        commitMessages,
+        fileFlags,
+        cache,
         updatedAt,
         headSha,
-        data: {
-          title,
-          author,
-          labels: labelNames,
-          url: prDetail.html_url,
-          description,
-          additions,
-          deletions,
-          changedFiles,
-          files,
-          commits,
-        },
-        cachedAt: new Date().toISOString(),
-      }
-
-      return {
-        number: prNum,
-        title,
-        author,
-        labels: labelNames,
-        url: prDetail.html_url,
-        description,
-        additions,
-        deletions,
-        changedFiles,
-      }
+      })
+      totalAdditions += result.additions
+      totalDeletions += result.deletions
+      totalChangedFiles += result.changedFiles
+      return result.detail
     }),
   )
 
@@ -511,10 +603,10 @@ export async function collectMetadata(options: CollectMetadataOptions): Promise<
     totalChangedFiles,
     extensionCounts,
     commitMessages: [...commitMessages],
-    hasEnvFiles,
-    hasCredentialFiles,
-    hasSecretFiles,
-    hasMigrationFiles,
+    hasEnvFiles: fileFlags.hasEnvFiles,
+    hasCredentialFiles: fileFlags.hasCredentialFiles,
+    hasSecretFiles: fileFlags.hasSecretFiles,
+    hasMigrationFiles: fileFlags.hasMigrationFiles,
   }
 
   const metadata: ReleaseMetadata = {

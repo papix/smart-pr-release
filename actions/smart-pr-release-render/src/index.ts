@@ -286,61 +286,81 @@ function resolveWorkspacePath(inputPath: string, workspace: string | undefined):
   return inputPath
 }
 
+function parseTemperature(temperatureEnv: string | undefined): number {
+  const temperature = temperatureEnv === undefined || temperatureEnv === '' ? 0.2 : Number(temperatureEnv)
+
+  if (Number.isNaN(temperature)) {
+    throw new Error('AI_TEMPERATURE must be a number')
+  }
+
+  if (temperature < 0 || temperature > 2) {
+    throw new Error('AI_TEMPERATURE must be between 0 and 2')
+  }
+
+  return temperature
+}
+
+interface RunConfig {
+  templatePath: string
+  metadataPath: string
+  auditPath: string
+  provider: LLMProvider
+  apiKey: string
+  model: string
+  baseUrl: string
+  temperature: number
+  outputLanguage: string
+}
+
+function buildRunConfig(ctx: RunContext): RunConfig {
+  const workspace = ctx.env.GITHUB_WORKSPACE
+
+  const templatePath = resolveWorkspacePath(ctx.env.RELEASE_TEMPLATE_PATH || '.github/release-template.md', workspace)
+  const metadataPath = resolveWorkspacePath(
+    ctx.env.RELEASE_METADATA_PATH || '.smart-pr-release/metadata.json',
+    workspace,
+  )
+  const auditPath = resolveWorkspacePath('.smart-pr-release/audit.json', workspace)
+
+  const provider = (ctx.env.AI_PROVIDER || 'none') as LLMProvider
+  const apiKey = ctx.env.AI_API_KEY || ''
+  const model = ctx.env.AI_MODEL || 'gpt-5-mini'
+  const baseUrl = ctx.env.AI_BASE_URL || 'https://api.openai.com'
+
+  if (baseUrl) {
+    validateBaseUrl(baseUrl)
+  }
+
+  const temperature = parseTemperature(ctx.env.AI_TEMPERATURE)
+  const outputLanguage = ctx.env.RELEASE_OUTPUT_LANGUAGE || 'en'
+
+  return { templatePath, metadataPath, auditPath, provider, apiKey, model, baseUrl, temperature, outputLanguage }
+}
+
 export async function run(ctx: RunContext = createDefaultContext(), deps?: RunDeps): Promise<void> {
   const resolvedDeps = deps ?? (await createDefaultDeps())
   try {
-    // Use GITHUB_WORKSPACE as base directory when running in GitHub Actions
-    // This ensures paths are resolved relative to the caller repository, not the action repository
-    const workspace = ctx.env.GITHUB_WORKSPACE
+    const config = buildRunConfig(ctx)
 
-    const templatePath = resolveWorkspacePath(ctx.env.RELEASE_TEMPLATE_PATH || '.github/release-template.md', workspace)
-    const metadataPath = resolveWorkspacePath(
-      ctx.env.RELEASE_METADATA_PATH || '.smart-pr-release/metadata.json',
-      workspace,
-    )
-    const auditPath = resolveWorkspacePath('.smart-pr-release/audit.json', workspace)
-
-    const provider = (ctx.env.AI_PROVIDER || 'none') as LLMProvider
-    const apiKey = ctx.env.AI_API_KEY || ''
-    const model = ctx.env.AI_MODEL || 'gpt-5-mini'
-    const baseUrl = ctx.env.AI_BASE_URL || 'https://api.openai.com'
-
-    if (baseUrl) {
-      validateBaseUrl(baseUrl)
+    resolvedDeps.core.info(`Template path: ${config.templatePath}`)
+    resolvedDeps.core.info(`Metadata path: ${config.metadataPath}`)
+    if (config.provider !== 'none') {
+      resolvedDeps.core.info(`Using AI provider: ${config.provider}`)
     }
 
-    const temperatureEnv = ctx.env.AI_TEMPERATURE
-    const temperature = temperatureEnv === undefined || temperatureEnv === '' ? 0.2 : Number(temperatureEnv)
-
-    if (Number.isNaN(temperature)) {
-      throw new Error('AI_TEMPERATURE must be a number')
-    }
-
-    if (temperature < 0 || temperature > 2) {
-      throw new Error('AI_TEMPERATURE must be between 0 and 2')
-    }
-
-    const outputLanguage = ctx.env.RELEASE_OUTPUT_LANGUAGE || 'en'
-
-    resolvedDeps.core.info(`Template path: ${templatePath}`)
-    resolvedDeps.core.info(`Metadata path: ${metadataPath}`)
-    if (provider !== 'none') {
-      resolvedDeps.core.info(`Using AI provider: ${provider}`)
-    }
-
-    const metadataRaw = await resolvedDeps.fs.readFile(metadataPath, 'utf8')
+    const metadataRaw = await resolvedDeps.fs.readFile(config.metadataPath, 'utf8')
     const metadata = JSON.parse(metadataRaw as string) as ReleaseMetadata
 
     const result = await renderReleasePR({
-      templatePath,
+      templatePath: config.templatePath,
       metadata,
-      provider,
-      apiKey,
-      model,
-      baseUrl,
-      temperature,
-      outputLanguage,
-      auditPath,
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model,
+      baseUrl: config.baseUrl,
+      temperature: config.temperature,
+      outputLanguage: config.outputLanguage,
+      auditPath: config.auditPath,
     })
 
     resolvedDeps.core.setOutput('title', result.title)

@@ -91,24 +91,123 @@ function getApiKey(jsonMode: boolean): string {
   return key
 }
 
+function printHeader(options: CliOptions): void {
+  log(options, '='.repeat(60))
+  log(options, 'smart-pr-release')
+  log(options, '='.repeat(60))
+  log(options, `Repository: ${options.repo}`)
+  log(options, `Base branch: ${options.base}`)
+  log(options, `Head branch: ${options.head}`)
+  log(options, `Provider: ${options.provider}`)
+  log(options, `Template: ${options.template}`)
+  if (options.labels.length > 0) {
+    log(options, `Labels: ${options.labels.join(', ')}`)
+  }
+  if (options.squashed) {
+    log(options, 'Squash merge detection: enabled')
+  }
+  log(options, `Mode: ${options.execute ? 'execute' : 'dry-run (default)'}`)
+  log(options, '='.repeat(60))
+}
+
+function printDryRunPreview(
+  options: CliOptions,
+  collectResult: CollectMetadataResult,
+  renderResult: { title: string; body: string },
+): void {
+  log(options, '\n=== Preview: Release PR ===')
+  log(options, `Title: ${renderResult.title}`)
+  log(options, `Base: ${options.base} ← Head: ${options.head}`)
+  log(options, `Included PRs: ${collectResult.prNumbers.length}`)
+  log(options, '')
+  log(options, '--- Body ---')
+  log(options, renderResult.body)
+  log(options, '--- End of Body ---')
+  log(options, '')
+  if (collectResult.existingPrNumber) {
+    log(options, `To update PR #${collectResult.existingPrNumber}, run with --execute`)
+  } else {
+    log(options, 'To create a new PR, run with --execute')
+  }
+}
+
+function printDryRunJson(collectResult: CollectMetadataResult, renderResult: { title: string; body: string }): void {
+  console.log(
+    JSON.stringify(
+      {
+        existingPrNumber: collectResult.existingPrNumber,
+        title: renderResult.title,
+        body: renderResult.body,
+        execute: false,
+        prCount: collectResult.prNumbers.length,
+      },
+      null,
+      2,
+    ),
+  )
+}
+
+function printFooter(options: CliOptions): void {
+  log(options, `\n${'='.repeat(60)}`)
+  log(options, 'Output files:')
+  log(options, '  - .smart-pr-release/metadata.json')
+  if (options.provider !== 'none') {
+    log(options, '  - .smart-pr-release/audit.json')
+  }
+  log(options, '='.repeat(60))
+}
+
+function validateTemplate(options: CliOptions): string {
+  const templatePath = resolve(process.cwd(), options.template)
+  if (!existsSync(templatePath)) {
+    handleError(`Template file not found: ${templatePath}`, options.json)
+  }
+
+  const templateContent = readFileSync(templatePath, 'utf8')
+  const hasLLMCall = hasLLMCalls(templateContent)
+  if (hasLLMCall && options.provider === 'none') {
+    handleError(
+      'Template contains LLM calls (it.llm) but --provider is not set. ' +
+        'Please use --provider openai or remove LLM calls from template.',
+      options.json,
+    )
+  }
+
+  return templatePath
+}
+
+interface CreateResultOutput {
+  prNumber: number
+  prUrl: string
+  created: boolean
+}
+
+function printExecuteResult(options: CliOptions, createResult: CreateResultOutput): void {
+  if (options.json) {
+    console.log(
+      JSON.stringify(
+        {
+          prNumber: createResult.prNumber,
+          prUrl: createResult.prUrl,
+          created: createResult.created,
+        },
+        null,
+        2,
+      ),
+    )
+  } else {
+    if (createResult.created) {
+      log(options, `Created new release PR #${createResult.prNumber}`)
+    } else {
+      log(options, `Updated existing release PR #${createResult.prNumber}`)
+    }
+    log(options, `URL: ${createResult.prUrl}`)
+  }
+}
+
 async function runCli(options: CliOptions): Promise<void> {
   if (!options.json) {
-    log(options, '='.repeat(60))
-    log(options, 'smart-pr-release')
-    log(options, '='.repeat(60))
-    log(options, `Repository: ${options.repo}`)
-    log(options, `Base branch: ${options.base}`)
-    log(options, `Head branch: ${options.head}`)
-    log(options, `Provider: ${options.provider}`)
-    log(options, `Template: ${options.template}`)
-    if (options.labels.length > 0) {
-      log(options, `Labels: ${options.labels.join(', ')}`)
-    }
-    if (options.squashed) {
-      log(options, 'Squash merge detection: enabled')
-    }
-    log(options, `Mode: ${options.execute ? 'execute' : 'dry-run (default)'}`)
-    log(options, '='.repeat(60))
+    printHeader(options)
   }
 
   debug(options, `Starting with options: ${JSON.stringify(options)}`)
@@ -136,21 +235,7 @@ async function runCli(options: CliOptions): Promise<void> {
 
   log(options, '\n[Step 2] Rendering template...')
 
-  const templatePath = resolve(process.cwd(), options.template)
-  if (!existsSync(templatePath)) {
-    handleError(`Template file not found: ${templatePath}`, options.json)
-  }
-
-  const templateContent = readFileSync(templatePath, 'utf8')
-  const hasLLMCall = hasLLMCalls(templateContent)
-  if (hasLLMCall && options.provider === 'none') {
-    handleError(
-      'Template contains LLM calls (it.llm) but --provider is not set. ' +
-        'Please use --provider openai or remove LLM calls from template.',
-      options.json,
-    )
-  }
-
+  const templatePath = validateTemplate(options)
   const apiKey = options.provider !== 'none' ? getApiKey(options.json) : undefined
 
   const renderResult = await renderReleasePR({
@@ -167,34 +252,9 @@ async function runCli(options: CliOptions): Promise<void> {
 
   if (!options.execute) {
     if (options.json) {
-      console.log(
-        JSON.stringify(
-          {
-            existingPrNumber: collectResult.existingPrNumber,
-            title: renderResult.title,
-            body: renderResult.body,
-            execute: false,
-            prCount: collectResult.prNumbers.length,
-          },
-          null,
-          2,
-        ),
-      )
+      printDryRunJson(collectResult, renderResult)
     } else {
-      log(options, '\n=== Preview: Release PR ===')
-      log(options, `Title: ${renderResult.title}`)
-      log(options, `Base: ${options.base} ← Head: ${options.head}`)
-      log(options, `Included PRs: ${collectResult.prNumbers.length}`)
-      log(options, '')
-      log(options, '--- Body ---')
-      log(options, renderResult.body)
-      log(options, '--- End of Body ---')
-      log(options, '')
-      if (collectResult.existingPrNumber) {
-        log(options, `To update PR #${collectResult.existingPrNumber}, run with --execute`)
-      } else {
-        log(options, 'To create a new PR, run with --execute')
-      }
+      printDryRunPreview(options, collectResult, renderResult)
     }
   } else {
     const createResult = await createReleasePR({
@@ -207,36 +267,11 @@ async function runCli(options: CliOptions): Promise<void> {
       client,
     })
 
-    if (options.json) {
-      console.log(
-        JSON.stringify(
-          {
-            prNumber: createResult.prNumber,
-            prUrl: createResult.prUrl,
-            created: createResult.created,
-          },
-          null,
-          2,
-        ),
-      )
-    } else {
-      if (createResult.created) {
-        log(options, `Created new release PR #${createResult.prNumber}`)
-      } else {
-        log(options, `Updated existing release PR #${createResult.prNumber}`)
-      }
-      log(options, `URL: ${createResult.prUrl}`)
-    }
+    printExecuteResult(options, createResult)
   }
 
   if (!options.json) {
-    log(options, `\n${'='.repeat(60)}`)
-    log(options, 'Output files:')
-    log(options, '  - .smart-pr-release/metadata.json')
-    if (options.provider !== 'none') {
-      log(options, '  - .smart-pr-release/audit.json')
-    }
-    log(options, '='.repeat(60))
+    printFooter(options)
   }
 }
 

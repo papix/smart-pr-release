@@ -29,8 +29,8 @@ export default defineConfig({
         'packages/core/src/cli-types.ts',
       ],
       /**
-       * Coverage thresholds: 80% (error threshold) / Target: 90%
-       * - Error if below 80%, target 90% or higher
+       * Coverage thresholds: 90% (error threshold)
+       * - Error if below 90%
        * - 100% is not cost-effective and reduces test maintainability
        *
        * Reference: Google's standard considers 90% exemplary

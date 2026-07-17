@@ -37,7 +37,13 @@
         "noForEach": "error"
       },
       "style": {
-        "noParameterAssign": "error"
+        "noParameterAssign": "error",
+        "useFilenamingConvention": {
+          "level": "error",
+          "options": {
+            "filenameCases": ["kebab-case"]
+          }
+        }
       },
       "performance": {
         "noAccumulatingSpread": "error"

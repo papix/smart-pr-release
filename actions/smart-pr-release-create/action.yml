@@ -16,10 +16,16 @@ inputs:
     default: 'main'
   title:
     description: 'PR title'
-    required: true
+    required: false
+    default: ''
   body:
     description: 'PR body'
-    required: true
+    required: false
+    default: ''
+  result_path:
+    description: 'Path to a rendered title/body transfer file'
+    required: false
+    default: ''
   existing_pr_number:
     description: 'Existing PR number to update (empty to create new)'
     required: false
@@ -53,6 +59,7 @@ runs:
         RELEASE_HEAD: ${{ inputs.head_branch }}
         RELEASE_TITLE: ${{ inputs.title }}
         RELEASE_BODY: ${{ inputs.body }}
+        RELEASE_RESULT_PATH: ${{ inputs.result_path }}
         RELEASE_EXISTING_PR_NUMBER: ${{ inputs.existing_pr_number }}
         RELEASE_LABELS: ${{ inputs.labels }}
       run: pnpm exec tsx ${{ github.action_path }}/src/index.ts

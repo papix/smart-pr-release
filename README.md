@@ -12,12 +12,14 @@ This monorepo contains:
 | [@papix/smart-pr-release-cli](./packages/cli) | CLI tool |
 | [GitHub Actions](./actions) | Reusable GitHub Actions |
 
+The published CLI and core package require Node.js 22.13.0 or later. Development uses Node.js 24.18.0 and pnpm 11.13.1, pinned by `.node-version` and `packageManager`.
+
 ## Features
 
 - Automatic release PR creation from merge commits
 - AI-powered release summary generation (OpenAI)
 - Automatic masking of sensitive information before sending to AI
-- Customizable Eta templates and prompts
+- Customizable restricted templates and prompts
 - PR metadata caching to reduce GitHub API calls
 - Reusable GitHub Actions workflow
 
@@ -58,16 +60,18 @@ on:
 
 jobs:
   smart-pr-release:
-    uses: papix/smart-pr-release/.github/workflows/smart-pr-release.yml@v1
+    uses: papix/smart-pr-release/.github/workflows/smart-pr-release.yml@<FULL_COMMIT_SHA>
     secrets: inherit
 ```
+
+Replace `<FULL_COMMIT_SHA>` with the complete commit SHA for the version you reviewed. Do not use a mutable tag such as `v1`. The reusable workflow checks out its implementation at that same SHA and uses its own pinned Node.js 24.18.0 and pnpm 11.13.1 toolchain, independent of the caller repository's `package.json` and lockfile.
 
 ### Configuration Options
 
 ```yaml
 jobs:
   smart-pr-release:
-    uses: papix/smart-pr-release/.github/workflows/smart-pr-release.yml@v1
+    uses: papix/smart-pr-release/.github/workflows/smart-pr-release.yml@<FULL_COMMIT_SHA>
     with:
       # Branch configuration
       base_branch: 'production'  # Default: 'production'
@@ -117,8 +121,8 @@ If you encounter rate limit errors:
 ### Template Errors
 
 - Ensure template file exists at the specified path
-- Check Eta template syntax: https://eta.js.org/docs/syntax
-- `it.llm()` requires `--provider openai` to be set
+- Use only the restricted tags documented below; arbitrary JavaScript and legacy Eta tags are rejected
+- `{{ llm "prompt" }}` requires `--provider openai` to be set
 
 ## Individual Actions
 
@@ -128,32 +132,50 @@ If you encounter rate limit errors:
 
 ## Template Format
 
-Create a `.github/release-template.md` file in your repository (see `release-template-example.md.eta` for a full example):
+Create a `.github/release-template.md` file in your repository (see `release-template-example.md` for a full example):
 
-```eta
-Release <%= it.date %>
+```markdown
+Release {{ date }}
 
 > This PR body is auto-generated. Manual edits will be overwritten.
 
 ### Summary
-<%~ await it.llm('Summarize the release in bullet points') %>
+{{ llm "Summarize the release in bullet points" }}
 
 ### Included Pull Requests
-<% it.pullRequests.forEach(pr => { %>
-- [ ] #<%= pr.number %> <%= pr.title %> (@<%= pr.author %>)
-<% }) %>
+{{#pullRequests}}
+- [ ] #{{ number }} {{ title }} (@{{ author }})
+{{/pullRequests}}
 
 ### Verification Checklist
-<%~ await it.llm('List verification items to check before release') %>
+{{ llm "List verification items to check before release" }}
 ```
 
-The `it.llm(prompt)` function calls the AI provider with the given prompt and inserts the response. This function is only available when `--provider openai` is set.
+Supported tags are `{{ date }}`, the `{{#pullRequests}}` section with `{{ number }}`, `{{ title }}`, and `{{ author }}`, and `{{ llm "prompt" }}`. LLM prompts use JSON string escaping. The LLM tag calls the configured AI provider and inserts the response; it is only available when `--provider openai` is set. Templates are parsed with an allowlist and are never evaluated as JavaScript.
+
+Templates are limited to 65,536 characters, at most four LLM tags, and 4,096 characters per LLM prompt. LLM tags are not allowed inside `{{#pullRequests}}` sections. These limits are validated before the first external AI request.
+
+Each LLM response is limited to 16,384 UTF-16 code units and is parsed as CommonMark before insertion. Only paragraphs, headings, lists, emphasis, strong text, inline/code blocks, hard breaks, thematic breaks, and text are preserved. Links are reduced to their labels, images to alt text, block quotes to their contents, definitions are removed, and raw HTML is rendered harmless with full-width delimiters. Outside code, URL schemes, `www.`, mentions, and GitHub-style issue references are neutralized. Unicode bidirectional controls are replaced everywhere. The sanitized result is serialized, parsed again, and rejected if any unsafe structure or lexical form remains.
+
+Rendered release titles and bodies are validated twice: immediately after rendering and before the GitHub client or create/update API is used. Titles must be non-empty after trimming, at most 256 UTF-16 code units, and contain no newline, C0, or DEL control characters. Bodies may be empty, are limited to 65,536 UTF-16 code units, and permit only TAB, LF, and CR among C0 controls. Invalid content is rejected rather than truncated or normalized.
+
+### Migrating from Eta templates
+
+The restricted template format is a breaking change independent of the Node.js 20 support removal. Legacy Eta tags such as `<%= ... %>` are rejected; migrate them to the supported tags above.
+
+When updating an existing caller to a commit containing this change, update its template and the reusable workflow's full commit SHA together. The first canary must include both changes. Do not update only the workflow SHA while leaving an Eta template in place. After the migrated-template canary succeeds, update the caller's Node.js and pnpm toolchain separately if needed.
 
 ## Security
 
 - All text is masked for sensitive patterns (API keys, passwords, PII) before being sent to the AI provider
-- An aggregate audit log is created per render (recording total prompt size, masked patterns, and duration across all AI calls)
+- Caller-controlled templates cannot execute JavaScript or read workflow environment variables
+- Template files must resolve within the caller repository workspace, including after symlink resolution
+- Template and LLM-call limits are validated before any paid API request
+- Rendering runs with read-only repository permissions; PR writes run later in a separate job from a fresh action checkout
+- An aggregate audit log is created per render after the first AI request starts, including call count, prompt size, masked-pattern count, output-sanitization count, duration, success/failure status, and a stable non-sensitive error code
+- A failed audit write rejects the rendered result; prompts, PR data, LLM output, URLs, mentions, secrets, and raw exception messages are never written to the audit entry
 - The audit log is uploaded as a workflow artifact
+- Repository-specific custom autolinks and GitHub's implicit commit-SHA links cannot be resolved during rendering and remain a documented residual risk; review generated release PRs and configure repository autolinks accordingly
 
 ## Development
 

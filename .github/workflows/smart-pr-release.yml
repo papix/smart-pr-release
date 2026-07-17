@@ -42,13 +42,13 @@ on:
     outputs:
       pr_number:
         description: 'Release PR number'
-        value: ${{ jobs.smart-pr-release.outputs.pr_number }}
+        value: ${{ jobs.create.outputs.pr_number }}
       pr_url:
         description: 'Release PR URL'
-        value: ${{ jobs.smart-pr-release.outputs.pr_url }}
+        value: ${{ jobs.create.outputs.pr_url }}
       created:
         description: 'Whether a new PR was created (true) or existing PR updated (false)'
-        value: ${{ jobs.smart-pr-release.outputs.created }}
+        value: ${{ jobs.create.outputs.created }}
 
 permissions: {}
 
@@ -57,8 +57,101 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  smart-pr-release:
-    name: Smart PR Release
+  render:
+    name: Collect and render release PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      existing_pr_number: ${{ steps.collect.outputs.existing_pr_number }}
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout smart-pr-release
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .smart-pr-release-action
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: .smart-pr-release-action/package.json
+          cache_dependency_path: .smart-pr-release-action/pnpm-lock.yaml
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version-file: .smart-pr-release-action/.node-version
+          cache: 'pnpm'
+          cache-dependency-path: .smart-pr-release-action/pnpm-lock.yaml
+
+      - name: Verify toolchain versions
+        run: |
+          node --version
+          pnpm --version
+          test "$(node --version)" = "v24.18.0"
+          test "$(pnpm --version)" = "11.13.1"
+
+      - name: Install smart-pr-release dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: .smart-pr-release-action
+
+      - name: Restore PR cache
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+        with:
+          path: .smart-pr-release/cache
+          key: smart-pr-release-cache-${{ github.repository }}-${{ inputs.base_branch }}
+
+      - name: Collect Release Metadata
+        id: collect
+        uses: ./.smart-pr-release-action/actions/smart-pr-release-collect
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          base_branch: ${{ inputs.base_branch }}
+          head_branch: ${{ inputs.head_branch }}
+
+      - name: Render Release PR
+        id: render
+        uses: ./.smart-pr-release-action/actions/smart-pr-release-render
+        with:
+          template_path: ${{ inputs.template_path }}
+          metadata_path: .smart-pr-release/metadata.json
+          provider: ${{ inputs.ai_provider }}
+          api_key: ${{ secrets.OPENAI_API_KEY }}
+          model: ${{ inputs.ai_model }}
+          temperature: ${{ inputs.ai_temperature }}
+          output_language: ${{ inputs.output_language }}
+          result_path: ${{ runner.temp }}/smart-pr-release-render/render-result.json
+          audit_path: ${{ runner.temp }}/smart-pr-release-render/audit.json
+
+      - name: Upload rendered result
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: smart-pr-release-render-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.render.outputs.result_path }}
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload AI audit log
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: smart-pr-release-audit
+          path: ${{ runner.temp }}/smart-pr-release-render/audit.json
+          if-no-files-found: ignore
+
+  create:
+    name: Create or update release PR
+    needs: render
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -73,58 +166,46 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout smart-pr-release
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          repository: papix/smart-pr-release
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: .smart-pr-release-action
+          persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: .smart-pr-release-action/package.json
+          cache_dependency_path: .smart-pr-release-action/pnpm-lock.yaml
 
       - name: Setup Node.js
         uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
-          node-version: '20'
+          node-version-file: .smart-pr-release-action/.node-version
           cache: 'pnpm'
           cache-dependency-path: .smart-pr-release-action/pnpm-lock.yaml
+
+      - name: Verify toolchain versions
+        run: |
+          node --version
+          pnpm --version
+          test "$(node --version)" = "v24.18.0"
+          test "$(pnpm --version)" = "11.13.1"
 
       - name: Install smart-pr-release dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
         working-directory: .smart-pr-release-action
 
-      - name: Restore PR cache
-        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+      - name: Download rendered result
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          path: .smart-pr-release/cache
-          key: smart-pr-release-cache-${{ github.repository }}-${{ inputs.base_branch }}
+          name: smart-pr-release-render-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/smart-pr-release-render
 
-      # Step 1: Collect metadata from branch comparison
-      - name: Collect Release Metadata
-        id: collect
-        uses: ./.smart-pr-release-action/actions/smart-pr-release-collect
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          base_branch: ${{ inputs.base_branch }}
-          head_branch: ${{ inputs.head_branch }}
-
-      # Step 2: Render PR title and body from template
-      - name: Render Release PR
-        id: render
-        uses: ./.smart-pr-release-action/actions/smart-pr-release-render
-        with:
-          template_path: ${{ inputs.template_path }}
-          metadata_path: .smart-pr-release/metadata.json
-          provider: ${{ inputs.ai_provider }}
-          api_key: ${{ secrets.OPENAI_API_KEY }}
-          model: ${{ inputs.ai_model }}
-          temperature: ${{ inputs.ai_temperature }}
-          output_language: ${{ inputs.output_language }}
-
-      # Step 3: Create or update release PR
       - name: Create or Update Release PR
         id: create
         uses: ./.smart-pr-release-action/actions/smart-pr-release-create
@@ -132,9 +213,8 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           base_branch: ${{ inputs.base_branch }}
           head_branch: ${{ inputs.head_branch }}
-          title: ${{ steps.render.outputs.title }}
-          body: ${{ steps.render.outputs.body }}
-          existing_pr_number: ${{ steps.collect.outputs.existing_pr_number }}
+          result_path: ${{ runner.temp }}/smart-pr-release-render/render-result.json
+          existing_pr_number: ${{ needs.render.outputs.existing_pr_number }}
 
       - name: Add release label
         if: steps.create.outputs.pr_number != ''
@@ -145,11 +225,3 @@ jobs:
         run: |
           gh label create "$RELEASE_LABEL" --color "0e8a16" --description "Release PR" --force
           gh pr edit "$PR_NUMBER" --add-label "$RELEASE_LABEL"
-
-      - name: Upload AI audit log
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: smart-pr-release-audit
-          path: .smart-pr-release/audit.json
-          if-no-files-found: ignore

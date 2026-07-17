@@ -35,6 +35,14 @@ inputs:
     description: 'Output language for AI summary (e.g., ja, en)'
     required: false
     default: 'ja'
+  result_path:
+    description: 'Path to write the rendered title/body transfer file'
+    required: false
+    default: '.smart-pr-release/render-result.json'
+  audit_path:
+    description: 'Path to write the AI audit log'
+    required: false
+    default: '.smart-pr-release/audit.json'
 
 outputs:
   title:
@@ -45,7 +53,10 @@ outputs:
     value: ${{ steps.render.outputs.body }}
   audit_path:
     description: 'Path to the audit log file'
-    value: '.smart-pr-release/audit.json'
+    value: ${{ inputs.audit_path }}
+  result_path:
+    description: 'Path to the rendered title/body transfer file'
+    value: ${{ steps.render.outputs.result_path }}
 
 runs:
   using: 'composite'
@@ -63,4 +74,6 @@ runs:
         AI_TEMPERATURE: ${{ inputs.temperature }}
         AI_BASE_URL: ${{ inputs.base_url }}
         RELEASE_OUTPUT_LANGUAGE: ${{ inputs.output_language }}
+        RELEASE_RESULT_PATH: ${{ inputs.result_path }}
+        RELEASE_AUDIT_PATH: ${{ inputs.audit_path }}
       run: pnpm exec tsx ${{ github.action_path }}/src/index.ts

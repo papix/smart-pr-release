@@ -11,7 +11,7 @@ export default defineConfig({
   ],
   format: ['esm'],
   dts: true,
-  target: 'node20',
+  target: 'node22',
   platform: 'node',
   clean: true,
   // Externalize dynamic imports from cli-types.ts to reduce bundle size

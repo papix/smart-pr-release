@@ -1,6 +1,7 @@
 import * as core from '@actions/core'
 import { createDefaultContext, createDefaultDeps, type RunContext, type RunDeps } from '#core/cli-types.js'
 import { createGitHubClientFromEnv, type GitHubClient } from '#core/github-api.js'
+import { validateReleaseContent } from '#core/release-content-policy.js'
 
 export interface CreateReleasePROptions {
   baseBranch: string
@@ -18,11 +19,38 @@ export interface CreateReleasePRResult {
   created: boolean
 }
 
+interface RenderedResultFile {
+  title: string
+  body: string
+}
+
+async function readRenderedResult(resultPath: string, deps: RunDeps): Promise<RenderedResultFile> {
+  const raw = await deps.fs.readFile(resultPath, 'utf8')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw as string)
+  } catch {
+    throw new Error('Rendered result file must be valid JSON.')
+  }
+
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error('Rendered result file must contain string title and body fields.')
+  }
+
+  const { title, body } = parsed as Record<string, unknown>
+  if (typeof title !== 'string' || typeof body !== 'string') {
+    throw new Error('Rendered result file must contain string title and body fields.')
+  }
+
+  return { title, body }
+}
+
 /**
  * Create or update release PR
  */
 export async function createReleasePR(options: CreateReleasePROptions): Promise<CreateReleasePRResult> {
   const { baseBranch, headBranch, title, body, labels = [], existingPrNumber } = options
+  validateReleaseContent(title, body)
   const client = options.client || createGitHubClientFromEnv()
 
   // Update existing PR
@@ -82,8 +110,10 @@ export async function run(ctx: RunContext = createDefaultContext(), deps?: RunDe
   try {
     const baseBranch = ctx.env.RELEASE_BASE || 'production'
     const headBranch = ctx.env.RELEASE_HEAD || 'main'
-    const title = ctx.env.RELEASE_TITLE
-    const body = ctx.env.RELEASE_BODY
+    const resultPath = ctx.env.RELEASE_RESULT_PATH
+    const renderedResult = resultPath ? await readRenderedResult(resultPath, resolvedDeps) : undefined
+    const title = renderedResult?.title ?? ctx.env.RELEASE_TITLE
+    const body = renderedResult?.body ?? ctx.env.RELEASE_BODY
     const existingPrNumberStr = ctx.env.RELEASE_EXISTING_PR_NUMBER
     const labelsStr = ctx.env.RELEASE_LABELS || ''
 
@@ -101,8 +131,6 @@ export async function run(ctx: RunContext = createDefaultContext(), deps?: RunDe
       .map((l) => l.trim())
       .filter((l) => l.length > 0)
 
-    const client = createGitHubClientFromEnv()
-
     const result = await createReleasePR({
       baseBranch,
       headBranch,
@@ -110,7 +138,6 @@ export async function run(ctx: RunContext = createDefaultContext(), deps?: RunDe
       body,
       labels,
       existingPrNumber,
-      client,
     })
 
     resolvedDeps.core.setOutput('pr_number', String(result.prNumber))

@@ -36,9 +36,11 @@ smart-pr-release --new-option value
 
 ```yaml
 # Workflow example
-- uses: papix/smart-pr-release@v1
-  with:
-    new_option: value
+jobs:
+  release-pr:
+    uses: papix/smart-pr-release/.github/workflows/smart-pr-release.yml@<FULL_COMMIT_SHA>
+    with:
+      new_option: value
 ```
 
 ## Additional Context

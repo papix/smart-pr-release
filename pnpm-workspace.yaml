@@ -1,2 +1,8 @@
 packages:
   - 'packages/*'
+
+overrides:
+  vite: 7.3.5
+
+allowBuilds:
+  esbuild: true

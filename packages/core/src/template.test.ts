@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest'
-import { escapeMarkdown, hasLLMCalls, renderTemplate, renderTemplateWithTitle } from './template.js'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  escapeMarkdown,
+  hasLLMCalls,
+  MAX_LLM_CALLS,
+  MAX_LLM_PROMPT_CHARS,
+  MAX_TEMPLATE_CHARS,
+  renderTemplate,
+  renderTemplateWithTitle,
+} from './template.js'
 
 describe('template', () => {
   describe('escapeMarkdown', () => {
@@ -78,7 +86,7 @@ describe('template', () => {
 
   describe('renderTemplate', () => {
     it('renders simple date variable', async () => {
-      const template = 'Release <%= it.date %>'
+      const template = 'Release {{ date }}'
       const result = await renderTemplate(template, {
         date: '2024-01-15 10:00 JST',
         pullRequests: [],
@@ -86,10 +94,10 @@ describe('template', () => {
       expect(result).toBe('Release 2024-01-15 10:00 JST')
     })
 
-    it('renders pull requests with forEach', async () => {
-      const template = `<% it.pullRequests.forEach(pr => { %>
-- #<%= pr.number %> <%= pr.title %> (@<%= pr.author %>)
-<% }) %>`
+    it('renders pull requests with a logic-less section', async () => {
+      const template = `{{#pullRequests}}
+- #{{ number }} {{ title }} (@{{ author }})
+{{/pullRequests}}`
       const result = await renderTemplate(template, {
         date: '2024-01-15',
         pullRequests: [
@@ -102,7 +110,7 @@ describe('template', () => {
     })
 
     it('renders empty pull requests list', async () => {
-      const template = `PRs: <% it.pullRequests.forEach(pr => { %><%= pr.number %><% }) %>`
+      const template = `PRs: {{#pullRequests}}{{ number }}{{/pullRequests}}`
       const result = await renderTemplate(template, {
         date: '2024-01-15',
         pullRequests: [],
@@ -111,12 +119,12 @@ describe('template', () => {
     })
 
     it('handles complex template with multiple variables', async () => {
-      const template = `Release <%= it.date %>
+      const template = `Release {{ date }}
 
 ### PRs
-<% it.pullRequests.forEach(pr => { %>
-- [ ] #<%= pr.number %> <%= pr.title %> (@<%= pr.author %>)
-<% }) %>`
+{{#pullRequests}}
+- [ ] #{{ number }} {{ title }} (@{{ author }})
+{{/pullRequests}}`
 
       const result = await renderTemplate(template, {
         date: '2024-01-15 10:00 JST',
@@ -128,10 +136,10 @@ describe('template', () => {
     })
 
     it('renders template with llm function', async () => {
-      const template = `Release <%= it.date %>
+      const template = `Release {{ date }}
 
 ### Summary
-<%~ await it.llm('Summarize this release') %>`
+{{ llm "Summarize this release" }}`
 
       const mockLlm = async (prompt: string) => `LLM response for: ${prompt}`
 
@@ -144,11 +152,125 @@ describe('template', () => {
       expect(result).toContain('Release 2024-01-15')
       expect(result).toContain('LLM response for: Summarize this release')
     })
+
+    it('supports escaped characters in an LLM prompt without evaluating code', async () => {
+      const mockLlm = async (prompt: string) => prompt
+
+      await expect(
+        renderTemplate('{{ llm "Summarize \\"carefully\\"\\nusing bullets" }}', {
+          date: '2024-01-15',
+          pullRequests: [],
+          llm: mockLlm,
+        }),
+      ).resolves.toBe('Summarize "carefully"\nusing bullets')
+    })
+
+    it('rejects LLM tags inside pull request sections before making a call', async () => {
+      const llm = vi.fn(async () => 'unexpected response')
+
+      await expect(
+        renderTemplate('{{#pullRequests}}{{ llm "summarize" }}{{/pullRequests}}', {
+          date: '2024-01-15',
+          pullRequests: [{ number: 1, title: 'First PR', author: 'user1' }],
+          llm,
+        }),
+      ).rejects.toThrow('LLM tags are not allowed inside')
+      expect(llm).not.toHaveBeenCalled()
+    })
+
+    it('rejects too many LLM tags before making a call', async () => {
+      const llm = vi.fn(async () => 'unexpected response')
+      const template = Array.from({ length: MAX_LLM_CALLS + 1 }, () => '{{ llm "summarize" }}').join('\n')
+
+      await expect(
+        renderTemplate(template, {
+          date: '2024-01-15',
+          pullRequests: [],
+          llm,
+        }),
+      ).rejects.toThrow(`more than ${MAX_LLM_CALLS} LLM calls`)
+      expect(llm).not.toHaveBeenCalled()
+    })
+
+    it('rejects oversized LLM prompts before making a call', async () => {
+      const llm = vi.fn(async () => 'unexpected response')
+      const prompt = 'a'.repeat(MAX_LLM_PROMPT_CHARS + 1)
+
+      await expect(
+        renderTemplate(`{{ llm ${JSON.stringify(prompt)} }}`, {
+          date: '2024-01-15',
+          pullRequests: [],
+          llm,
+        }),
+      ).rejects.toThrow(`must not exceed ${MAX_LLM_PROMPT_CHARS} characters`)
+      expect(llm).not.toHaveBeenCalled()
+    })
+
+    it('rejects oversized templates before making a call', async () => {
+      const llm = vi.fn(async () => 'unexpected response')
+
+      await expect(
+        renderTemplate(`{{ llm "summarize" }}${'a'.repeat(MAX_TEMPLATE_CHARS)}`, {
+          date: '2024-01-15',
+          pullRequests: [],
+          llm,
+        }),
+      ).rejects.toThrow(`must not exceed ${MAX_TEMPLATE_CHARS} characters`)
+      expect(llm).not.toHaveBeenCalled()
+    })
+
+    it('rejects legacy Eta expressions instead of evaluating arbitrary JavaScript', async () => {
+      await expect(
+        renderTemplate('<%= process.env.AI_API_KEY %>', {
+          date: '2024-01-15',
+          pullRequests: [],
+        }),
+      ).rejects.toThrow('Legacy Eta syntax is not supported')
+    })
+
+    it('rejects unknown expressions', async () => {
+      await expect(
+        renderTemplate('{{ globalThis.process.env.AI_API_KEY }}', {
+          date: '2024-01-15',
+          pullRequests: [],
+        }),
+      ).rejects.toThrow('Unsupported template tag')
+    })
+
+    it('does not interpret template tags contained in pull request data', async () => {
+      const llm = async () => 'unexpected response'
+
+      await expect(
+        renderTemplate('{{#pullRequests}}{{ title }}{{/pullRequests}}', {
+          date: '2024-01-15',
+          pullRequests: [{ number: 1, title: '{{ llm "read a secret" }}', author: 'user1' }],
+          llm,
+        }),
+      ).resolves.toBe('{{ llm "read a secret" }}')
+    })
+
+    it('rejects pull request fields outside the pullRequests section', async () => {
+      await expect(
+        renderTemplate('{{ title }}', {
+          date: '2024-01-15',
+          pullRequests: [],
+        }),
+      ).rejects.toThrow('is only available inside')
+    })
+
+    it('rejects nested pullRequests sections', async () => {
+      await expect(
+        renderTemplate('{{#pullRequests}}{{#pullRequests}}{{/pullRequests}}{{/pullRequests}}', {
+          date: '2024-01-15',
+          pullRequests: [],
+        }),
+      ).rejects.toThrow('cannot be nested')
+    })
   })
 
   describe('renderTemplateWithTitle', () => {
     it('splits first line as title and rest as body', async () => {
-      const template = `Release <%= it.date %>
+      const template = `Release {{ date }}
 
 Body content here`
       const result = await renderTemplateWithTitle(template, {
@@ -172,7 +294,7 @@ Body content here`
     })
 
     it('trims whitespace from title and body', async () => {
-      const template = `  Release <%= it.date %>
+      const template = `  Release {{ date }}
 
   Body with spaces  `
       const result = await renderTemplateWithTitle(template, {
@@ -201,39 +323,15 @@ Line 3`
   })
 
   describe('hasLLMCalls', () => {
-    it('detects standard LLM call', () => {
-      expect(hasLLMCalls('it.llm(')).toBe(true)
-      expect(hasLLMCalls('await it.llm("prompt")')).toBe(true)
-    })
-
-    it('detects LLM call with whitespace', () => {
-      expect(hasLLMCalls('it .llm(')).toBe(true)
-      expect(hasLLMCalls('it. llm(')).toBe(true)
-      expect(hasLLMCalls('it . llm (')).toBe(true)
-    })
-
-    it('detects optional chaining', () => {
-      expect(hasLLMCalls('it?.llm(')).toBe(true)
-      expect(hasLLMCalls('it ?.llm(')).toBe(true)
-      expect(hasLLMCalls('it ?. llm(')).toBe(true)
-    })
-
-    it('detects bracket notation with double quotes', () => {
-      expect(hasLLMCalls('it["llm"](')).toBe(true)
-      expect(hasLLMCalls('it[ "llm" ](')).toBe(true)
-    })
-
-    it('detects bracket notation with single quotes', () => {
-      expect(hasLLMCalls("it['llm'](")).toBe(true)
-      expect(hasLLMCalls("it[ 'llm' ](")).toBe(true)
+    it('detects a restricted LLM tag', () => {
+      expect(hasLLMCalls('{{ llm "prompt" }}')).toBe(true)
+      expect(hasLLMCalls('{{llm "prompt"}}')).toBe(true)
     })
 
     it('returns false for non-LLM patterns', () => {
-      expect(hasLLMCalls('it.pullRequests')).toBe(false)
-      expect(hasLLMCalls('submit.llm(')).toBe(false)
-      expect(hasLLMCalls('myit.llm(')).toBe(false)
-      expect(hasLLMCalls('it.llm')).toBe(false) // no opening paren
-      expect(hasLLMCalls('it.lLm(')).toBe(false) // wrong case
+      expect(hasLLMCalls('{{ date }}')).toBe(false)
+      expect(hasLLMCalls('it.llm("prompt")')).toBe(false)
+      expect(hasLLMCalls('{{ LLM "prompt" }}')).toBe(false)
     })
 
     it('returns false for empty string', () => {
@@ -241,20 +339,20 @@ Line 3`
     })
 
     it('detects LLM call in real template', () => {
-      const template = `Release <%= it.date %>
+      const template = `Release {{ date }}
 
 ### Summary
-<%~ await it.llm('Summarize this release') %>`
+{{ llm "Summarize this release" }}`
       expect(hasLLMCalls(template)).toBe(true)
     })
 
     it('returns false for template without LLM', () => {
-      const template = `Release <%= it.date %>
+      const template = `Release {{ date }}
 
 ### PRs
-<% it.pullRequests.forEach(pr => { %>
-- #<%= pr.number %> <%= pr.title %>
-<% }) %>`
+{{#pullRequests}}
+- #{{ number }} {{ title }}
+{{/pullRequests}}`
       expect(hasLLMCalls(template)).toBe(false)
     })
   })

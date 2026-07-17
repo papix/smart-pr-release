@@ -25,6 +25,17 @@ describe('smart-pr-release-create', () => {
   })
 
   describe('createReleasePR', () => {
+    it.each([
+      [' ', '', 'RELEASE_TITLE_EMPTY'],
+      ['x'.repeat(257), '', 'RELEASE_TITLE_TOO_LONG'],
+      ['bad\nrelease', '', 'RELEASE_TITLE_INVALID_CHAR'],
+      ['Release', 'x'.repeat(65_537), 'RELEASE_BODY_TOO_LONG'],
+      ['Release', 'bad\u0000body', 'RELEASE_BODY_INVALID_CHAR'],
+    ])('rejects invalid content before creating a default client', async (title, body, code) => {
+      await expect(createReleasePR({ baseBranch: 'production', headBranch: 'main', title, body })).rejects.toThrow(code)
+      expect(mockCreateGitHubClientFromEnv).not.toHaveBeenCalled()
+    })
+
     it('creates new PR when no existing PR number provided', async () => {
       const mockClient = {
         createPullRequest: vi.fn().mockResolvedValue({
@@ -264,6 +275,71 @@ describe('smart-pr-release-create', () => {
       expect(mockDeps.core.setOutput).toHaveBeenCalledWith('pr_number', '100')
       expect(mockDeps.core.setOutput).toHaveBeenCalledWith('pr_url', 'https://github.com/test/pr/100')
       expect(mockDeps.core.setOutput).toHaveBeenCalledWith('created', 'true')
+    })
+
+    it('loads title and body from the rendered result transfer file', async () => {
+      const createPullRequest = vi.fn().mockResolvedValue({
+        number: 101,
+        html_url: 'https://github.com/test/pr/101',
+      })
+      mockCreateGitHubClientFromEnv.mockReturnValue({ createPullRequest } as never)
+      const mockContext = createMockContext({
+        env: {
+          RELEASE_RESULT_PATH: '/runner/temp/render/result.json',
+        },
+      })
+      const mockDeps = createMockDeps({
+        fs: {
+          readFile: vi.fn().mockResolvedValue('{"title":"Transferred release","body":"Transferred body"}'),
+          writeFile: vi.fn(),
+          mkdir: vi.fn(),
+        },
+      })
+
+      await run(mockContext, mockDeps)
+
+      expect(mockDeps.fs.readFile).toHaveBeenCalledWith('/runner/temp/render/result.json', 'utf8')
+      expect(createPullRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Transferred release', body: 'Transferred body' }),
+      )
+    })
+
+    it('rejects an invalid rendered result transfer file', async () => {
+      const mockContext = createMockContext({
+        env: { RELEASE_RESULT_PATH: '/runner/temp/render/result.json' },
+      })
+      const mockDeps = createMockDeps({
+        fs: {
+          readFile: vi.fn().mockResolvedValue('{"title":42,"body":"Body"}'),
+          writeFile: vi.fn(),
+          mkdir: vi.fn(),
+        },
+      })
+
+      await run(mockContext, mockDeps)
+
+      expect(mockDeps.core.setFailed).toHaveBeenCalledWith(
+        'Rendered result file must contain string title and body fields.',
+      )
+      expect(mockCreateGitHubClientFromEnv).not.toHaveBeenCalled()
+    })
+
+    it('rejects unsafe transferred content before creating a GitHub client', async () => {
+      const mockContext = createMockContext({
+        env: { RELEASE_RESULT_PATH: '/runner/temp/render/result.json' },
+      })
+      const mockDeps = createMockDeps({
+        fs: {
+          readFile: vi.fn().mockResolvedValue('{"title":"bad\\nrelease","body":"Body"}'),
+          writeFile: vi.fn(),
+          mkdir: vi.fn(),
+        },
+      })
+
+      await run(mockContext, mockDeps)
+
+      expect(mockDeps.core.setFailed).toHaveBeenCalledWith('RELEASE_TITLE_INVALID_CHAR')
+      expect(mockCreateGitHubClientFromEnv).not.toHaveBeenCalled()
     })
 
     it('updates existing PR when existing_pr_number provided', async () => {

@@ -211,7 +211,7 @@ export async function renderTemplate(template: string, data: TemplateData): Prom
 export async function renderTemplateWithTitle(template: string, data: TemplateData): Promise<RenderedTemplate> {
   const rendered = await renderTemplate(template, data)
   const lines = rendered.split('\n')
-  const title = lines[0]?.trim() || 'Release'
-  const body = lines.slice(1).join('\n').trim()
+  const title = lines[0] ?? ''
+  const body = lines.slice(1).join('\n')
   return { title, body }
 }

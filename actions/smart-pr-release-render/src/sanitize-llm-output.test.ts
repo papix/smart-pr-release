@@ -1,5 +1,61 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_LLM_OUTPUT_CHARS, sanitizeLLMOutput, validateLLMOutputNode } from './sanitize-llm-output.js'
+import {
+  assertSafeComposedLLMOutput,
+  MAX_LLM_OUTPUT_CHARS,
+  sanitizeLLMOutput,
+  validateLLMOutputNode,
+} from './sanitize-llm-output.js'
+
+describe('assertSafeComposedLLMOutput', () => {
+  it('accepts content without LLM spans and trusted unsafe content outside an LLM span', () => {
+    expect(() => assertSafeComposedLLMOutput('https://trusted.example', [])).not.toThrow()
+    expect(() => assertSafeComposedLLMOutput('https://trusted.example safe', [{ start: 24, end: 28 }])).not.toThrow()
+    expect(() => assertSafeComposedLLMOutput('safe\ntext', [{ start: 0, end: 9 }])).not.toThrow()
+  })
+
+  it.each([
+    ['**safe** https://trusted.example', { start: 0, end: 8 }],
+    ['**safe**https://trusted.example', { start: 0, end: 8 }],
+    ['**safe**WWW.example', { start: 0, end: 8 }],
+    ['**safe**#123', { start: 0, end: 8 }],
+    ['**safe**GH-123', { start: 0, end: 8 }],
+    ['# safe\n\nhttps://trusted.example', { start: 0, end: 6 }],
+    ['- safe\n\n@trusted #123', { start: 0, end: 6 }],
+  ])('accepts safe LLM Markdown before trusted lexical content', (content, span) => {
+    expect(() => assertSafeComposedLLMOutput(content, [span])).not.toThrow()
+  })
+
+  it('rejects unsafe lexical and structural content composed across an LLM boundary', () => {
+    expect(() => assertSafeComposedLLMOutput('https://example.com', [{ start: 5, end: 6 }])).toThrow(
+      'LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT',
+    )
+    expect(() => assertSafeComposedLLMOutput('[safe](https://example.com)', [{ start: 1, end: 5 }])).toThrow(
+      'LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT',
+    )
+  })
+
+  it('rejects lexical occurrence substitution through a cross-boundary code fence', () => {
+    const llmOutput = '://attacker.example\n\n```\nx\n```'
+    const content = `https${llmOutput}https://trusted.example`
+
+    expect(() => assertSafeComposedLLMOutput(content, [{ start: 5, end: 5 + llmOutput.length }])).toThrow(
+      'LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT',
+    )
+  })
+
+  it('rejects code nodes that consume both LLM and trusted content', () => {
+    expect(() => assertSafeComposedLLMOutput('`safe` trusted', [{ start: 1, end: 5 }])).toThrow(
+      'LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT',
+    )
+  })
+
+  it.each([[{ start: -1, end: 0 }], [{ start: 2, end: 1 }], [{ start: 0, end: 2 }]])(
+    'rejects an invalid LLM span',
+    (span) => {
+      expect(() => assertSafeComposedLLMOutput('x', [span])).toThrow('LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT')
+    },
+  )
+})
 
 describe('sanitizeLLMOutput', () => {
   it('preserves allowlisted Markdown including nested lists and hard breaks', () => {
@@ -64,6 +120,13 @@ describe('sanitizeLLMOutput', () => {
   it('accepts allowlisted leaf and empty container nodes in the defensive AST validator', () => {
     expect(() => validateLLMOutputNode({ type: 'break' })).not.toThrow()
     expect(() => validateLLMOutputNode({ type: 'paragraph' })).not.toThrow()
+  })
+
+  it('accepts missing optional values in transformed defensive AST nodes', () => {
+    expect(() => validateLLMOutputNode({ type: 'blockquote' })).not.toThrow()
+    expect(() => validateLLMOutputNode({ type: 'image' })).not.toThrow()
+    expect(() => validateLLMOutputNode({ type: 'html' })).not.toThrow()
+    expect(() => validateLLMOutputNode({ type: 'text' })).not.toThrow()
   })
 
   it('accepts the exact input boundary', () => {

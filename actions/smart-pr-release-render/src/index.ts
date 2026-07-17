@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as core from '@actions/core'
@@ -8,9 +9,15 @@ import OpenAI from 'openai'
 import { createDefaultContext, createDefaultDeps, type RunContext, type RunDeps } from '#core/cli-types.js'
 import { maskSensitive } from '#core/mask-sensitive.js'
 import { ReleaseContentPolicyError, validateReleaseContent } from '#core/release-content-policy.js'
-import { escapeMarkdown, hasLLMCalls, type PullRequestInfo, renderTemplateWithTitle } from '#core/template.js'
+import { escapeMarkdown, hasLLMCalls, type PullRequestInfo, renderTemplate } from '#core/template.js'
 import type { ReleaseMetadata } from '#core/types.js'
-import { LLMOutputPolicyError, type SanitizedLLMOutput, sanitizeLLMOutput } from './sanitize-llm-output.js'
+import {
+  assertSafeComposedLLMOutput,
+  LLMOutputPolicyError,
+  type LLMOutputSpan,
+  type SanitizedLLMOutput,
+  sanitizeLLMOutput,
+} from './sanitize-llm-output.js'
 
 // Initialize dayjs plugins
 dayjs.extend(utc)
@@ -60,9 +67,9 @@ class StableRenderError extends Error {
 
 function normalizeDestination(baseUrl: string): string {
   try {
-    return new URL(baseUrl).host || baseUrl
+    return new URL(baseUrl).host || 'invalid'
   } catch {
-    return baseUrl
+    return 'invalid'
   }
 }
 
@@ -135,6 +142,46 @@ interface LLMCallStats {
   outputSanitizationCount: number
 }
 
+interface LLMOutputMarker {
+  start: string
+  end: string
+}
+
+function markLLMOutput(content: string, markers: LLMOutputMarker[]): string {
+  const nonce = randomUUID()
+  const marker = {
+    start: `\u{E000}${nonce}:start\u{E001}`,
+    end: `\u{E000}${nonce}:end\u{E001}`,
+  }
+  markers.push(marker)
+  return `${marker.start}${content}${marker.end}`
+}
+
+function removeLLMOutputMarkers(
+  rendered: string,
+  markers: LLMOutputMarker[],
+): { content: string; spans: LLMOutputSpan[] } {
+  let content = ''
+  let cursor = 0
+  const spans: LLMOutputSpan[] = []
+
+  for (const marker of markers) {
+    const markerStart = rendered.indexOf(marker.start, cursor)
+    const outputStart = markerStart + marker.start.length
+    const markerEnd = markerStart < 0 ? -1 : rendered.indexOf(marker.end, outputStart)
+    if (markerStart < 0 || markerEnd < 0) throw new StableRenderError('LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT')
+
+    content += rendered.slice(cursor, markerStart)
+    const spanStart = content.length
+    content += rendered.slice(outputStart, markerEnd)
+    spans.push({ start: spanStart, end: content.length })
+    cursor = markerEnd + marker.end.length
+  }
+
+  content += rendered.slice(cursor)
+  return { content, spans }
+}
+
 function createLLMFunction(
   pullRequests: PullRequestInfo[],
   apiKey: string,
@@ -144,6 +191,7 @@ function createLLMFunction(
   temperature: number,
   maskedCount: number,
   stats: LLMCallStats,
+  markers: LLMOutputMarker[],
 ): (prompt: string) => Promise<string> {
   const client = new OpenAI({
     apiKey,
@@ -203,7 +251,7 @@ function createLLMFunction(
     }
 
     core.info('LLM response received')
-    return sanitized.content
+    return markLLMOutput(sanitized.content, markers)
   }
 }
 
@@ -251,16 +299,28 @@ async function renderTemplateAttempt(
   template: string,
   pullRequests: PullRequestInfo[],
   llm: ((prompt: string) => Promise<string>) | undefined,
+  markers: LLMOutputMarker[],
 ): Promise<RenderAttempt> {
   try {
-    const result = await renderTemplateWithTitle(template, {
+    const rendered = await renderTemplate(template, {
       date: formatDate(),
       pullRequests,
       llm,
     })
+    const { content, spans } = removeLLMOutputMarkers(rendered, markers)
+    assertSafeComposedLLMOutput(content, spans)
+    const lines = content.split('\n')
+    const result = {
+      title: lines[0] ?? '',
+      body: lines.slice(1).join('\n'),
+    }
     validateReleaseContent(result.title, result.body)
     return { result }
   } catch (error) {
+    if (error instanceof LLMOutputPolicyError) {
+      const failure = new StableRenderError(error.code)
+      return { failure, errorCode: failure.code }
+    }
     if (error instanceof StableRenderError || error instanceof ReleaseContentPolicyError) {
       return { failure: error, errorCode: error.code }
     }
@@ -339,13 +399,24 @@ export async function renderReleasePR(options: RenderOptions): Promise<RenderRes
     piiMaskedCount: 0,
     outputSanitizationCount: 0,
   }
+  const markers: LLMOutputMarker[] = []
   const llm =
     provider !== 'none' && apiKey
-      ? createLLMFunction(pullRequests, apiKey, model, baseUrl, outputLanguage, temperature, maskedCount, stats)
+      ? createLLMFunction(
+          pullRequests,
+          apiKey,
+          model,
+          baseUrl,
+          outputLanguage,
+          temperature,
+          maskedCount,
+          stats,
+          markers,
+        )
       : undefined
 
   const startedAt = Date.now()
-  const attempt = await renderTemplateAttempt(template, pullRequests, llm)
+  const attempt = await renderTemplateAttempt(template, pullRequests, llm, markers)
   await writeLLMAudit(stats, { provider, model, baseUrl, auditPath }, attempt, startedAt)
 
   if (attempt.failure) throw attempt.failure

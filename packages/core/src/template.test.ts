@@ -279,21 +279,21 @@ Body content here`
       })
 
       expect(result.title).toBe('Release 2024-01-15')
-      expect(result.body).toBe('Body content here')
+      expect(result.body).toBe('\nBody content here')
     })
 
-    it('returns "Release" as default title for empty first line', async () => {
+    it('preserves an empty first line for downstream validation', async () => {
       const template = ''
       const result = await renderTemplateWithTitle(template, {
         date: '2024-01-15',
         pullRequests: [],
       })
 
-      expect(result.title).toBe('Release')
+      expect(result.title).toBe('')
       expect(result.body).toBe('')
     })
 
-    it('trims whitespace from title and body', async () => {
+    it('preserves whitespace in title and body', async () => {
       const template = `  Release {{ date }}
 
   Body with spaces  `
@@ -302,8 +302,8 @@ Body content here`
         pullRequests: [],
       })
 
-      expect(result.title).toBe('Release 2024-01-15')
-      expect(result.body).toBe('Body with spaces')
+      expect(result.title).toBe('  Release 2024-01-15')
+      expect(result.body).toBe('\n  Body with spaces  ')
     })
 
     it('handles multi-line body correctly', async () => {
@@ -318,7 +318,7 @@ Line 3`
       })
 
       expect(result.title).toBe('Title')
-      expect(result.body).toBe('Line 1\nLine 2\nLine 3')
+      expect(result.body).toBe('\nLine 1\nLine 2\nLine 3')
     })
   })
 

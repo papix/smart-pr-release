@@ -1,6 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, type Options } from 'tsup'
@@ -13,13 +12,17 @@ let temporaryDirectory: string
 let bundledCli: string
 
 beforeAll(async () => {
-  temporaryDirectory = await mkdtemp(join(tmpdir(), 'smart-pr-release-cli-test-'))
+  temporaryDirectory = await mkdtemp(join(cliDirectory, '.smart-pr-release-cli-test-'))
   bundledCli = join(temporaryDirectory, 'index.js')
+  const packageJson = JSON.parse(await readFile(join(cliDirectory, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>
+  }
 
   await build({
     ...(config as Options),
     entry: [entry],
     outDir: temporaryDirectory,
+    external: Object.keys(packageJson.dependencies ?? {}),
     clean: true,
     silent: true,
   })

@@ -29,7 +29,16 @@ export interface MarkdownNode {
   lang?: string | null
   meta?: string | null
   children?: MarkdownNode[]
+  position?: {
+    start: { offset?: number }
+    end: { offset?: number }
+  }
   [key: string]: unknown
+}
+
+export interface LLMOutputSpan {
+  start: number
+  end: number
 }
 
 export interface SanitizedLLMOutput {
@@ -60,6 +69,18 @@ const URI_SCHEME_PATTERN =
 const WWW_PATTERN = /\bwww\./gi
 const ISSUE_PATTERN = /(^|[^\p{L}\p{N}_])#(?=\d+)/gu
 const GH_ISSUE_PATTERN = /\bGH-(?=\d+)/gi
+const COMPOSED_URI_TOKEN_PATTERN =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stop unsafe tokens at control characters
+  /\b(?:(?:https?|ftp|file|mailto|tel|sms|data|javascript|vbscript|ssh|git|xmpp|irc|ircs|news|nntp|steam|geo|magnet):|[a-z][a-z0-9+.-]*:(?=\/\/))[^\s<>\u0000-\u001F\u007F]*/gi
+const COMPOSED_LEXICAL_PATTERNS = [
+  { kind: 'scheme', pattern: COMPOSED_URI_TOKEN_PATTERN },
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stop unsafe tokens at control characters
+  { kind: 'www', pattern: /\bwww\.[^\s<>\u0000-\u001F\u007F]*/gi },
+  { kind: 'issue', pattern: /(^|[^\p{L}\p{N}_])(#[0-9]+)/gu, capture: 2 },
+  { kind: 'gh-issue', pattern: /\bGH-[0-9]+/gi },
+  { kind: 'mention', pattern: /@[\p{L}\p{N}_-]*/gu },
+  { kind: 'bidi', pattern: BIDI_PATTERN },
+] as const
 
 function replaceCounted(
   value: string,
@@ -202,6 +223,90 @@ function assertSafeTree(node: MarkdownNode): void {
     }
   }
   for (const child of node.children ?? []) assertSafeTree(child)
+}
+
+function overlapsLLMSpan(node: MarkdownNode, spans: LLMOutputSpan[]): boolean {
+  const start = node.position?.start.offset
+  const end = node.position?.end.offset
+  if (start === undefined || end === undefined) return spans.length > 0
+  return spans.some((span) => start < span.end && end > span.start)
+}
+
+function isFullyCoveredByLLMSpans(node: MarkdownNode, spans: LLMOutputSpan[]): boolean {
+  const start = node.position?.start.offset
+  const end = node.position?.end.offset
+  if (start === undefined || end === undefined) return false
+  let coveredUntil = start
+  for (const span of [...spans].sort((left, right) => left.start - right.start)) {
+    if (span.end <= coveredUntil) continue
+    if (span.start > coveredUntil) return false
+    coveredUntil = Math.max(coveredUntil, span.end)
+    if (coveredUntil >= end) return true
+  }
+  return coveredUntil >= end
+}
+
+function assertNoUnsafeComposedNodes(node: MarkdownNode, spans: LLMOutputSpan[]): void {
+  if (!ALLOWED_NODES.has(node.type) && overlapsLLMSpan(node, spans)) {
+    throw new LLMOutputPolicyError('LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT')
+  }
+  if (
+    (node.type === 'code' || node.type === 'inlineCode') &&
+    overlapsLLMSpan(node, spans) &&
+    !isFullyCoveredByLLMSpans(node, spans)
+  ) {
+    throw new LLMOutputPolicyError('LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT')
+  }
+  for (const child of node.children ?? []) assertNoUnsafeComposedNodes(child, spans)
+}
+
+function collectTextLexicalOccurrences(node: MarkdownNode, occurrences: Map<string, number>): void {
+  const value = node.value ?? ''
+  for (const { kind, pattern, ...options } of COMPOSED_LEXICAL_PATTERNS) {
+    const matcher = new RegExp(pattern.source, pattern.flags)
+    for (const match of value.matchAll(matcher)) {
+      const capture = 'capture' in options ? options.capture : 0
+      const matched = match[capture] ?? match[0]
+      const signature = `${kind}:${matched.toLocaleLowerCase('en-US')}`
+      occurrences.set(signature, (occurrences.get(signature) ?? 0) + 1)
+    }
+  }
+}
+
+function collectLexicalOccurrences(node: MarkdownNode, occurrences: Map<string, number>): void {
+  if (node.type === 'text') collectTextLexicalOccurrences(node, occurrences)
+  for (const child of node.children ?? []) collectLexicalOccurrences(child, occurrences)
+}
+
+function createCompositionBaseline(content: string, spans: LLMOutputSpan[]): string {
+  const codeUnits = content.split('')
+  for (const span of spans) {
+    if (span.start < 0 || span.end < span.start || span.end > content.length) {
+      throw new LLMOutputPolicyError('LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT')
+    }
+    for (let index = span.start; index < span.end; index += 1) {
+      if (codeUnits[index] !== '\n' && codeUnits[index] !== '\r') codeUnits[index] = '\uE000'
+    }
+  }
+  return codeUnits.join('')
+}
+
+export function assertSafeComposedLLMOutput(content: string, spans: LLMOutputSpan[]): void {
+  if (spans.length === 0) return
+
+  const actualTree = parseMarkdown(content)
+  assertNoUnsafeComposedNodes(actualTree, spans)
+
+  const baselineTree = parseMarkdown(createCompositionBaseline(content, spans))
+  const actualOccurrences = new Map<string, number>()
+  const baselineOccurrences = new Map<string, number>()
+  collectLexicalOccurrences(actualTree, actualOccurrences)
+  collectLexicalOccurrences(baselineTree, baselineOccurrences)
+  for (const [occurrence, count] of actualOccurrences) {
+    if (count > (baselineOccurrences.get(occurrence) ?? 0)) {
+      throw new LLMOutputPolicyError('LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT')
+    }
+  }
 }
 
 export function sanitizeLLMOutput(content: string): SanitizedLLMOutput {

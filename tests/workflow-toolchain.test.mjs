@@ -119,6 +119,7 @@ test('runs actionlint without requiring pull request write permissions', () => {
   const lintJob = getCiJob('lint-workflows')
   const actionlintStep = getCiStep('lint-workflows', 'Run actionlint')
   assert.match(actionlintStep, /^\s+reporter: local\s*$/m)
+  assert.match(actionlintStep, /^\s+filter_mode: nofilter\s*$/m)
   assert.doesNotMatch(actionlintStep, /^\s+reporter: github-pr-review\s*$/m)
   assert.doesNotMatch(lintJob, /^\s+permissions:/m)
 })

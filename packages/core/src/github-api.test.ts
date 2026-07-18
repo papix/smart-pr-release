@@ -9,6 +9,7 @@ const mockPullsListCommits = vi.fn()
 const mockPullsCreate = vi.fn()
 const mockIssuesCreateLabel = vi.fn()
 const mockIssuesAddLabels = vi.fn()
+const mockReposGetCommit = vi.fn()
 const mockReposCompareCommits = vi.fn()
 const mockPaginate = vi.fn()
 
@@ -30,6 +31,7 @@ vi.mock('@octokit/rest', () => {
           addLabels: mockIssuesAddLabels,
         },
         repos: {
+          getCommit: mockReposGetCommit,
           compareCommits: mockReposCompareCommits,
         },
       }
@@ -52,6 +54,9 @@ describe('github-api', () => {
         repo: 'test-repo',
       })
       vi.clearAllMocks()
+      mockReposGetCommit.mockImplementation(({ ref }: { ref: string }) =>
+        Promise.resolve({ data: { sha: `resolved-${ref}` } }),
+      )
     })
 
     afterEach(() => {
@@ -296,7 +301,10 @@ describe('github-api', () => {
 
     describe('getPullRequestCommits', () => {
       it('fetches all commits for a pull request', async () => {
-        const mockCommits = [{ commit: { message: 'Commit 1' } }, { commit: { message: 'Commit 2' } }]
+        const mockCommits = [
+          { sha: 'abc123', commit: { message: 'Commit 1' } },
+          { sha: 'def456', commit: { message: 'Commit 2' } },
+        ]
         mockPaginate.mockResolvedValue(mockCommits)
 
         const result = await client.getPullRequestCommits(123)
@@ -310,16 +318,25 @@ describe('github-api', () => {
             per_page: 100,
           }),
         )
-        expect(result).toEqual([{ commit: { message: 'Commit 1' } }, { commit: { message: 'Commit 2' } }])
+        expect(result).toEqual([
+          { sha: 'abc123', commit: { message: 'Commit 1' } },
+          { sha: 'def456', commit: { message: 'Commit 2' } },
+        ])
       })
 
       it('handles commits with null commit object', async () => {
-        const mockCommits = [{ commit: null }, { commit: { message: 'Commit 2' } }]
+        const mockCommits = [
+          { sha: 'abc123', commit: null },
+          { sha: 'def456', commit: { message: 'Commit 2' } },
+        ]
         mockPaginate.mockResolvedValue(mockCommits)
 
         const result = await client.getPullRequestCommits(123)
 
-        expect(result).toEqual([{ commit: undefined }, { commit: { message: 'Commit 2' } }])
+        expect(result).toEqual([
+          { sha: 'abc123', commit: undefined },
+          { sha: 'def456', commit: { message: 'Commit 2' } },
+        ])
       })
 
       it('throws error on failure', async () => {
@@ -380,12 +397,41 @@ describe('github-api', () => {
     })
 
     describe('compareCommits', () => {
+      it('pins mutable refs to commit SHAs before requesting comparison pages', async () => {
+        mockReposCompareCommits.mockResolvedValue({
+          data: {
+            status: 'identical',
+            ahead_by: 0,
+            behind_by: 0,
+            total_commits: 0,
+            commits: [],
+          },
+        })
+
+        await client.compareCommits('main', 'feature')
+
+        expect(mockReposGetCommit).toHaveBeenCalledTimes(2)
+        expect(mockReposGetCommit).toHaveBeenCalledWith({
+          owner: 'test-owner',
+          repo: 'test-repo',
+          ref: 'main',
+        })
+        expect(mockReposGetCommit).toHaveBeenCalledWith({
+          owner: 'test-owner',
+          repo: 'test-repo',
+          ref: 'feature',
+        })
+        expect(mockReposCompareCommits).toHaveBeenCalledWith(
+          expect.objectContaining({ base: 'resolved-main', head: 'resolved-feature' }),
+        )
+      })
+
       it('compares commits between base and head', async () => {
         const mockComparison = {
           status: 'ahead',
-          ahead_by: 2,
+          ahead_by: 1,
           behind_by: 0,
-          total_commits: 2,
+          total_commits: 1,
           commits: [
             {
               sha: 'abc123',
@@ -403,14 +449,16 @@ describe('github-api', () => {
         expect(mockReposCompareCommits).toHaveBeenCalledWith({
           owner: 'test-owner',
           repo: 'test-repo',
-          base: 'main',
-          head: 'feature',
+          base: 'resolved-main',
+          head: 'resolved-feature',
+          page: 1,
+          per_page: 100,
         })
         expect(result).toEqual({
           status: 'ahead',
-          ahead_by: 2,
+          ahead_by: 1,
           behind_by: 0,
-          total_commits: 2,
+          total_commits: 1,
           commits: [
             {
               sha: 'abc123',
@@ -471,6 +519,76 @@ describe('github-api', () => {
           email: undefined,
           date: undefined,
         })
+      })
+
+      it('fetches every page of a comparison', async () => {
+        const commits = Array.from({ length: 250 }, (_, index) => ({
+          sha: `sha-${index}`,
+          commit: { message: `Commit ${index}`, author: null },
+        }))
+        mockReposCompareCommits
+          .mockResolvedValueOnce({
+            data: {
+              status: 'ahead',
+              ahead_by: 250,
+              behind_by: 0,
+              total_commits: 250,
+              commits: commits.slice(0, 100),
+            },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              status: 'ahead',
+              ahead_by: 250,
+              behind_by: 0,
+              total_commits: 250,
+              commits: commits.slice(100, 200),
+            },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              status: 'ahead',
+              ahead_by: 250,
+              behind_by: 0,
+              total_commits: 250,
+              commits: commits.slice(200),
+            },
+          })
+
+        const result = await client.compareCommits('main', 'feature')
+
+        expect(mockReposCompareCommits).toHaveBeenCalledTimes(3)
+        expect(mockReposCompareCommits).toHaveBeenNthCalledWith(3, {
+          owner: 'test-owner',
+          repo: 'test-repo',
+          base: 'resolved-main',
+          head: 'resolved-feature',
+          page: 3,
+          per_page: 100,
+        })
+        expect(result.commits).toHaveLength(250)
+        expect(result.commits.at(-1)?.sha).toBe('sha-249')
+      })
+
+      it('fails closed when the API returns an incomplete comparison', async () => {
+        mockReposCompareCommits.mockResolvedValue({
+          data: {
+            status: 'ahead',
+            ahead_by: 2,
+            behind_by: 0,
+            total_commits: 2,
+            commits: [
+              {
+                sha: 'abc123',
+                commit: { message: 'Commit 1', author: null },
+              },
+            ],
+          },
+        })
+
+        await expect(client.compareCommits('main', 'feature')).rejects.toThrow(
+          'GitHub Compare API returned 1 of 2 commits',
+        )
       })
 
       it('throws error on failure', async () => {

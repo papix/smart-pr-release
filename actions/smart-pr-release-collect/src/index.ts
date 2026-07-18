@@ -309,7 +309,7 @@ async function processCommitsForPR(
   const commits: CommitInfo[] = []
   for (const commit of commitsResponse) {
     const message = commit.commit?.message?.trim()
-    const sha = (commit as { sha?: string }).sha || ''
+    const sha = commit.sha
     if (message && sha) {
       const maskedMessage = maskSensitive(message).masked
       commits.push({ sha, message: maskedMessage })
@@ -414,11 +414,10 @@ async function extractPullRequestNumbers(
 ): Promise<number[]> {
   const comparison = await client.compareCommits(base, head)
 
-  // Warn if GitHub Compare API 250 commit limit is reached
   if (comparison.total_commits > comparison.commits.length) {
-    core.warning(
-      `GitHub Compare API returned ${comparison.commits.length} commits, ` +
-        `but total is ${comparison.total_commits}. Some PRs may be missing.`,
+    throw new Error(
+      `GitHub Compare API returned ${comparison.commits.length} of ${comparison.total_commits} commits; ` +
+        'refusing to generate incomplete release metadata',
     )
   }
 

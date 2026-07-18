@@ -182,7 +182,7 @@ describe('smart-pr-release-collect', () => {
       expect(result.metadata.prs).toHaveLength(0)
     })
 
-    it('warns when Compare API 250 commit limit is reached', async () => {
+    it('fails closed when a comparison is incomplete', async () => {
       vi.mocked(fs.readFile).mockRejectedValue(new Error('File not found'))
 
       const mockClient = createMockClient({
@@ -196,18 +196,16 @@ describe('smart-pr-release-collect', () => {
         }),
       })
 
-      const core = await import('@actions/core')
-
-      await collectMetadata({
-        baseBranch: 'production',
-        headBranch: 'main',
-        outputPath: '/tmp/metadata.json',
-        cachePath: '/tmp/cache.json',
-        client: mockClient as never,
-      })
-
-      expect(core.warning).toHaveBeenCalledWith(
-        'GitHub Compare API returned 250 commits, but total is 300. Some PRs may be missing.',
+      await expect(
+        collectMetadata({
+          baseBranch: 'production',
+          headBranch: 'main',
+          outputPath: '/tmp/metadata.json',
+          cachePath: '/tmp/cache.json',
+          client: mockClient as never,
+        }),
+      ).rejects.toThrow(
+        'GitHub Compare API returned 250 of 300 commits; refusing to generate incomplete release metadata',
       )
     })
 

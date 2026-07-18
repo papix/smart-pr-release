@@ -27,6 +27,7 @@ import { loadConfig } from '#core/config.js'
 import { GitHubClient } from '#core/github-api.js'
 import { hasLLMCalls } from '#core/template.js'
 import { mergeOptions } from './merge-options.js'
+import { resolveTemplatePath } from './template-path.js'
 
 const VERSION = '0.1.0'
 
@@ -158,9 +159,11 @@ function printFooter(options: CliOptions): void {
 }
 
 function validateTemplate(options: CliOptions): string {
-  const templatePath = resolve(process.cwd(), options.template)
-  if (!existsSync(templatePath)) {
-    handleError(`Template file not found: ${templatePath}`, options.json)
+  let templatePath: string
+  try {
+    templatePath = resolveTemplatePath(options.template, process.cwd())
+  } catch (error) {
+    handleError(error instanceof Error ? error.message : 'Failed to resolve template path', options.json)
   }
 
   const templateContent = readFileSync(templatePath, 'utf8')

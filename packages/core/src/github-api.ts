@@ -161,7 +161,7 @@ export class GitHubClient {
     }
   }
 
-  async getPullRequestCommits(prNumber: number): Promise<Array<{ commit?: { message?: string } }>> {
+  async getPullRequestCommits(prNumber: number): Promise<Array<{ sha: string; commit?: { message?: string } }>> {
     try {
       const commits = await this.octokit.paginate(this.octokit.rest.pulls.listCommits, {
         owner: this.owner,
@@ -171,6 +171,7 @@ export class GitHubClient {
       })
 
       return commits.map((commit) => ({
+        sha: commit.sha,
         commit: commit.commit ? { message: commit.commit.message } : undefined,
       }))
     } catch (error) {
@@ -226,19 +227,58 @@ export class GitHubClient {
     }>
   }> {
     try {
-      const { data } = await this.octokit.rest.repos.compareCommits({
-        owner: this.owner,
-        repo: this.repo,
-        base,
-        head,
-      })
+      const [baseCommit, headCommit] = await Promise.all([
+        this.octokit.rest.repos.getCommit({
+          owner: this.owner,
+          repo: this.repo,
+          ref: base,
+        }),
+        this.octokit.rest.repos.getCommit({
+          owner: this.owner,
+          repo: this.repo,
+          ref: head,
+        }),
+      ])
+      const baseSha = baseCommit.data.sha
+      const headSha = headCommit.data.sha
+      const perPage = 100
+      let page = 1
+      let hasMore = true
+      let comparison: Awaited<ReturnType<typeof this.octokit.rest.repos.compareCommits>>['data'] | undefined
+      const commits: Awaited<ReturnType<typeof this.octokit.rest.repos.compareCommits>>['data']['commits'] = []
+
+      while (hasMore) {
+        const { data } = await this.octokit.rest.repos.compareCommits({
+          owner: this.owner,
+          repo: this.repo,
+          base: baseSha,
+          head: headSha,
+          page,
+          per_page: perPage,
+        })
+
+        comparison ??= data
+        commits.push(...data.commits)
+        hasMore = commits.length < data.total_commits && data.commits.length === perPage
+        if (hasMore) {
+          page += 1
+        }
+      }
+
+      if (!comparison) {
+        throw new Error('GitHub Compare API returned no comparison data')
+      }
+
+      if (commits.length !== comparison.total_commits) {
+        throw new Error(`GitHub Compare API returned ${commits.length} of ${comparison.total_commits} commits`)
+      }
 
       return {
-        status: data.status,
-        ahead_by: data.ahead_by,
-        behind_by: data.behind_by,
-        total_commits: data.total_commits,
-        commits: data.commits.map((commit) => ({
+        status: comparison.status,
+        ahead_by: comparison.ahead_by,
+        behind_by: comparison.behind_by,
+        total_commits: comparison.total_commits,
+        commits: commits.map((commit) => ({
           sha: commit.sha,
           commit: {
             message: commit.commit.message,

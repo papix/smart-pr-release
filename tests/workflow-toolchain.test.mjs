@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const workflow = await readFile(new URL('../.github/workflows/smart-pr-release.yml', import.meta.url), 'utf8')
+const ciWorkflow = await readFile(new URL('../.github/workflows/ci-reusable.yml', import.meta.url), 'utf8')
 
 function getJob(name) {
   const marker = `  ${name}:\n`
@@ -19,6 +20,26 @@ function getStep(jobName, stepName) {
   const marker = `      - name: ${stepName}`
   const start = job.indexOf(marker)
   assert.notEqual(start, -1, `workflow step not found in ${jobName}: ${stepName}`)
+
+  const next = job.indexOf('\n      - name:', start + marker.length)
+  return job.slice(start, next === -1 ? undefined : next)
+}
+
+function getCiJob(name) {
+  const marker = `  ${name}:\n`
+  const start = ciWorkflow.indexOf(marker)
+  assert.notEqual(start, -1, `CI workflow job not found: ${name}`)
+
+  const remainder = ciWorkflow.slice(start + marker.length)
+  const nextJob = /^ {2}[a-zA-Z0-9_-]+:\s*$/m.exec(remainder)
+  return ciWorkflow.slice(start, nextJob?.index === undefined ? undefined : start + marker.length + nextJob.index)
+}
+
+function getCiStep(jobName, stepName) {
+  const job = getCiJob(jobName)
+  const marker = `      - name: ${stepName}`
+  const start = job.indexOf(marker)
+  assert.notEqual(start, -1, `CI workflow step not found in ${jobName}: ${stepName}`)
 
   const next = job.indexOf('\n      - name:', start + marker.length)
   return job.slice(start, next === -1 ? undefined : next)
@@ -89,4 +110,15 @@ test('preserves the reusable workflow output contract through the create job', (
   assert.match(workflow, /^\s+value: \$\{\{ jobs\.create\.outputs\.pr_number \}\}\s*$/m)
   assert.match(workflow, /^\s+value: \$\{\{ jobs\.create\.outputs\.pr_url \}\}\s*$/m)
   assert.match(workflow, /^\s+value: \$\{\{ jobs\.create\.outputs\.created \}\}\s*$/m)
+})
+
+test('runs actionlint without requiring pull request write permissions', () => {
+  const topLevelPermissions = /^permissions:\n(?<entries>(?: {2}.+\n?)*)$/m.exec(ciWorkflow)
+  assert.equal(topLevelPermissions?.groups?.entries.trim(), 'contents: read')
+
+  const lintJob = getCiJob('lint-workflows')
+  const actionlintStep = getCiStep('lint-workflows', 'Run actionlint')
+  assert.match(actionlintStep, /^\s+reporter: local\s*$/m)
+  assert.doesNotMatch(actionlintStep, /^\s+reporter: github-pr-review\s*$/m)
+  assert.doesNotMatch(lintJob, /^\s+permissions:/m)
 })

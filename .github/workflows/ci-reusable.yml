@@ -26,7 +26,7 @@ jobs:
       - name: Run actionlint
         uses: reviewdog/action-actionlint@83e4ed25b168066ad8f62f5afbb29ebd8641d982 # v1.69.1
         with:
-          reporter: github-pr-review
+          reporter: local
           fail_level: error
           # actionlint 1.7.12 does not yet model these documented job context fields.
           # Their exact use is covered by tests/workflow-toolchain.test.mjs.

@@ -32,8 +32,8 @@ Paste any error messages or relevant logs here
 
 ## Environment
 
-- **Node.js version**: (e.g., v20.10.0)
-- **pnpm version**: (e.g., 9.0.0)
+- **Node.js version**: (e.g., v24.18.0)
+- **pnpm version**: (e.g., 11.13.1)
 - **OS**: (e.g., macOS 14.0, Ubuntu 22.04, Windows 11)
 - **Package version**: (e.g., @papix/smart-pr-release-cli@1.0.0)
 

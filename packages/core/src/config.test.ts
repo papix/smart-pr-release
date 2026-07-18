@@ -30,7 +30,7 @@ describe('loadConfig', () => {
     vi.mocked(fs.readFileSync).mockReturnValue(`
 base: production
 head: main
-template: .github/release-template.md.eta
+template: .github/release-template.md
 provider: openai
 language: ja
 squashed: true
@@ -41,7 +41,7 @@ squashed: true
     expect(result).toEqual({
       base: 'production',
       head: 'main',
-      template: '.github/release-template.md.eta',
+      template: '.github/release-template.md',
       provider: 'openai',
       language: 'ja',
       squashed: true,

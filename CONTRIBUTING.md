@@ -31,8 +31,8 @@ Please be respectful and constructive in all interactions. We aim to maintain a 
 
 ### Prerequisites
 
-- **Node.js**: v20.x or later (LTS recommended)
-- **pnpm**: v9.x or later
+- **Node.js**: v24.18.0 for development (v22.13.0 is the supported minimum)
+- **pnpm**: v11.13.1 or later
 
 ### Installation
 
@@ -120,6 +120,7 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/) e
 - `build`: Changes that affect the build system or external dependencies
 - `ci`: Changes to CI configuration files and scripts
 - `chore`: Other changes that don't modify src or test files
+- `revert`: Reverts a previous commit
 
 ### Scopes
 
@@ -143,8 +144,8 @@ ci: add automated release workflow
 Git hooks are configured via [Husky](https://typicode.github.io/husky/):
 
 - **commit-msg**: Validates commit message format
-- **pre-commit**: Runs lint and format checks
-- **pre-push**: Runs type check and tests
+- **pre-commit**: Runs type check and lint-staged (Biome + secretlint)
+- **pre-push**: Runs Biome check (CI mode), knip, and tests
 
 ## Pull Request Process
 
@@ -219,18 +220,7 @@ pnpm run check:ci
 
 ## Release Process
 
-Releases are automated via GitHub Actions:
-
-1. Changes merged to `main` trigger the release workflow
-2. Version is bumped based on commit types (semantic versioning)
-3. Changelog is generated from commit messages
-4. Packages are published to npm
-
-### Versioning
-
-- `feat`: Minor version bump (0.x.0)
-- `fix`: Patch version bump (0.0.x)
-- `BREAKING CHANGE`: Major version bump (x.0.0)
+Releases for this repository are handled by maintainers and are not automated in this repository at the moment.
 
 ## Questions?
 

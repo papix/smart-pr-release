@@ -15,7 +15,7 @@ if (!process.env.CI) {
     if (!realPath.startsWith(`${cwd}/`) && realPath !== cwd) {
       console.warn('Warning: .env.local path is outside project directory, skipping')
     } else {
-      dotenv.config({ path: envLocalPath })
+      dotenv.config({ path: envLocalPath, quiet: true })
     }
   }
 }
@@ -167,7 +167,7 @@ function validateTemplate(options: CliOptions): string {
   const hasLLMCall = hasLLMCalls(templateContent)
   if (hasLLMCall && options.provider === 'none') {
     handleError(
-      'Template contains LLM calls (it.llm) but --provider is not set. ' +
+      'Template contains LLM calls ({{ llm "..." }}) but --provider is not set. ' +
         'Please use --provider openai or remove LLM calls from template.',
       options.json,
     )

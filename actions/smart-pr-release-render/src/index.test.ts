@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises'
+import * as core from '@actions/core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunContext, RunDeps } from '#core/cli-types.js'
 import { renderReleasePR, run, validateBaseUrl } from './index.js'
@@ -22,6 +23,7 @@ vi.mock('node:fs/promises', () => ({
   readFile: vi.fn(),
   writeFile: vi.fn(),
   mkdir: vi.fn(),
+  realpath: vi.fn(),
 }))
 
 // Mock OpenAI
@@ -40,6 +42,7 @@ describe('smart-pr-release-render', () => {
     vi.clearAllMocks()
     vi.mocked(fs.mkdir).mockResolvedValue(undefined)
     vi.mocked(fs.writeFile).mockResolvedValue(undefined)
+    vi.mocked(fs.realpath).mockImplementation(async (filePath) => String(filePath))
     mockCreate.mockReset()
   })
 
@@ -85,11 +88,11 @@ describe('smart-pr-release-render', () => {
       },
     }
 
-    const simpleTemplate = `Release <%= it.date %>
+    const simpleTemplate = `Release {{ date }}
 ## Pull Requests
-<% for (const pr of it.pullRequests) { %>
-- #<%= pr.number %> <%= pr.title %> by @<%= pr.author %>
-<% } %>`
+{{#pullRequests}}
+- #{{ number }} {{ title }} by @{{ author }}
+{{/pullRequests}}`
 
     it('renders template with PR data', async () => {
       vi.mocked(fs.readFile).mockResolvedValue(simpleTemplate)
@@ -122,7 +125,7 @@ describe('smart-pr-release-render', () => {
 
     it('throws error when template requires LLM but not configured', async () => {
       const templateWithLLM = `Release
-<%= await it.llm("Generate summary") %>`
+{{ llm "Generate summary" }}`
       vi.mocked(fs.readFile).mockResolvedValue(templateWithLLM)
 
       await expect(
@@ -207,9 +210,9 @@ describe('smart-pr-release-render', () => {
       expect(result.body).toContain('\\[redacted\\]')
     })
 
-    it('detects LLM calls with whitespace variations', async () => {
-      const templateWithSpaces = `Release <%= it.date %>
-<%= await it . llm ( "Generate summary" ) %>`
+    it('detects LLM tags with whitespace variations', async () => {
+      const templateWithSpaces = `Release {{ date }}
+{{llm "Generate summary"}}`
       vi.mocked(fs.readFile).mockResolvedValue(templateWithSpaces)
 
       await expect(
@@ -222,9 +225,9 @@ describe('smart-pr-release-render', () => {
     })
 
     describe('with LLM provider', () => {
-      const templateWithLLM = `Release <%= it.date %>
+      const templateWithLLM = `Release {{ date }}
 
-<%= await it.llm("Generate a summary of the changes") %>`
+{{ llm "Generate a summary of the changes" }}`
 
       it('calls OpenAI API and renders template with LLM response', async () => {
         vi.mocked(fs.readFile).mockResolvedValue(templateWithLLM)
@@ -250,6 +253,66 @@ describe('smart-pr-release-render', () => {
           }),
         )
         expect(result.body).toContain('This release includes new features and bug fixes.')
+      })
+
+      it.each([
+        ['URI scheme', 'Release\nhttps{{ llm "summary" }}', '://attacker.example'],
+        ['Markdown link', 'Release\n[Generated]({{ llm "summary" }}', '//attacker.example)'],
+        ['HTML entity mention', 'Release\n&#{{ llm "summary" }}', '64;team'],
+        ['mention', 'Release\n@{{ llm "summary" }}', 'team'],
+        ['issue reference', 'Release\n#{{ llm "summary" }}', '123'],
+        ['GH issue reference', 'Release\nGH{{ llm "summary" }}', '-123'],
+        ['www address', 'Release\nwww{{ llm "summary" }}', '.attacker.example'],
+      ])('rejects unsafe %s reconstructed across an LLM boundary', async (_label, template, response) => {
+        vi.mocked(fs.readFile).mockResolvedValue(template)
+        mockCreate.mockResolvedValue({ choices: [{ message: { content: response } }] })
+
+        await expect(
+          renderReleasePR({
+            templatePath: '/tmp/template.md',
+            metadata: baseMetadata,
+            provider: 'openai',
+            apiKey: 'test-api-key',
+            auditPath: '/tmp/audit.json',
+          }),
+        ).rejects.toThrow('LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT')
+
+        const auditContent = JSON.parse(vi.mocked(fs.writeFile).mock.calls[0][1] as string)
+        expect(auditContent).toMatchObject({
+          llmCallCount: 1,
+          status: 'failure',
+          errorCode: 'LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT',
+        })
+      })
+
+      it('rejects URI-like content reconstructed inside cross-boundary inline code', async () => {
+        vi.mocked(fs.readFile).mockResolvedValue('Release\n`https{{ llm "summary" }}`')
+        mockCreate.mockResolvedValue({ choices: [{ message: { content: '://example.com' } }] })
+
+        await expect(
+          renderReleasePR({
+            templatePath: '/tmp/template.md',
+            metadata: baseMetadata,
+            provider: 'openai',
+            apiKey: 'test-api-key',
+            auditPath: '/tmp/audit.json',
+          }),
+        ).rejects.toThrow('LLM_OUTPUT_RESIDUAL_UNSAFE_CONTENT')
+      })
+
+      it('does not reject a trusted template URL next to safe LLM output', async () => {
+        vi.mocked(fs.readFile).mockResolvedValue('Release\nhttps://trusted.example {{ llm "summary" }}')
+        mockCreate.mockResolvedValue({ choices: [{ message: { content: 'Summary' } }] })
+
+        const result = await renderReleasePR({
+          templatePath: '/tmp/template.md',
+          metadata: baseMetadata,
+          provider: 'openai',
+          apiKey: 'test-api-key',
+          auditPath: '/tmp/audit.json',
+        })
+
+        expect(result.body).toBe('https://trusted.example Summary')
       })
 
       it('writes audit log after successful LLM call', async () => {
@@ -322,8 +385,9 @@ describe('smart-pr-release-render', () => {
             metadata: baseMetadata,
             provider: 'openai',
             apiKey: 'test-api-key',
+            auditPath: '/tmp/audit.json',
           }),
-        ).rejects.toThrow('OpenAI response missing content')
+        ).rejects.toThrow('LLM_OUTPUT_EMPTY')
       })
 
       it('throws error when OpenAI returns empty choices', async () => {
@@ -339,7 +403,7 @@ describe('smart-pr-release-render', () => {
             provider: 'openai',
             apiKey: 'test-api-key',
           }),
-        ).rejects.toThrow('OpenAI response missing content')
+        ).rejects.toThrow('LLM_OUTPUT_EMPTY')
       })
 
       it('builds correct PR context in LLM prompt', async () => {
@@ -444,7 +508,7 @@ describe('smart-pr-release-render', () => {
         expect(auditContent).toContain('"destination": "custom.openai.com"')
       })
 
-      it('uses original string when baseUrl is not a valid URL', async () => {
+      it('uses a fixed audit destination when baseUrl is not a valid URL', async () => {
         vi.mocked(fs.readFile).mockResolvedValue(templateWithLLM)
         mockCreate.mockResolvedValue({
           choices: [{ message: { content: 'Summary' } }],
@@ -461,14 +525,36 @@ describe('smart-pr-release-render', () => {
 
         const writeCall = vi.mocked(fs.writeFile).mock.calls[0]
         const auditContent = writeCall[1] as string
-        expect(auditContent).toContain('"destination": "not-a-valid-url"')
+        expect(auditContent).toContain('"destination": "invalid"')
+        expect(auditContent).not.toContain('not-a-valid-url')
+      })
+
+      it('uses a fixed audit destination when baseUrl has no host', async () => {
+        vi.mocked(fs.readFile).mockResolvedValue(templateWithLLM)
+        mockCreate.mockResolvedValue({
+          choices: [{ message: { content: 'Summary' } }],
+        })
+
+        await renderReleasePR({
+          templatePath: '/tmp/template.md',
+          metadata: baseMetadata,
+          provider: 'openai',
+          apiKey: 'test-api-key',
+          baseUrl: 'file:secret-destination',
+          auditPath: '/tmp/audit.json',
+        })
+
+        const writeCall = vi.mocked(fs.writeFile).mock.calls[0]
+        const auditContent = writeCall[1] as string
+        expect(auditContent).toContain('"destination": "invalid"')
+        expect(auditContent).not.toContain('secret-destination')
       })
 
       it('does not write audit log when provider is configured but no LLM calls in template', async () => {
-        const templateWithoutLLM = `Release <%= it.date %>
-<% for (const pr of it.pullRequests) { %>
-- #<%= pr.number %> <%= pr.title %>
-<% } %>`
+        const templateWithoutLLM = `Release {{ date }}
+{{#pullRequests}}
+- #{{ number }} {{ title }}
+{{/pullRequests}}`
         vi.mocked(fs.readFile).mockResolvedValue(templateWithoutLLM)
 
         await renderReleasePR({
@@ -513,6 +599,130 @@ describe('smart-pr-release-render', () => {
         // Token estimate should be based on actual prompt length
         expect(auditContent.inputTokenEstimate).toBe(Math.ceil(auditContent.inputCharCount / 4))
       })
+
+      it('sanitizes unsafe Markdown, warns once, and records transformations without content', async () => {
+        vi.mocked(fs.readFile).mockResolvedValue(templateWithLLM)
+        const unsafe = '[click @team #12](https://example.com)'
+        mockCreate.mockResolvedValue({ choices: [{ message: { content: unsafe } }] })
+
+        const result = await renderReleasePR({
+          templatePath: '/tmp/template.md',
+          metadata: baseMetadata,
+          provider: 'openai',
+          apiKey: 'test-api-key',
+          auditPath: '/tmp/audit.json',
+        })
+
+        expect(result.body).toContain('click ＠team ＃12')
+        expect(result.body).not.toContain('https://')
+        expect(core.warning).toHaveBeenCalledTimes(1)
+        const auditContent = JSON.parse(vi.mocked(fs.writeFile).mock.calls[0][1] as string)
+        expect(auditContent).toMatchObject({ llmCallCount: 1, outputSanitizationCount: 3, status: 'success' })
+        expect(JSON.stringify(auditContent)).not.toContain(unsafe)
+        expect(JSON.stringify(vi.mocked(core.info).mock.calls)).not.toContain(unsafe)
+        expect(JSON.stringify(vi.mocked(core.warning).mock.calls)).not.toContain(unsafe)
+        expect(JSON.stringify(vi.mocked(core.notice).mock.calls)).not.toContain(unsafe)
+      })
+
+      it('audits an LLM request failure using only the stable code', async () => {
+        vi.mocked(fs.readFile).mockResolvedValue(templateWithLLM)
+        mockCreate.mockRejectedValue(new Error('secret upstream details'))
+
+        await expect(
+          renderReleasePR({
+            templatePath: '/tmp/template.md',
+            metadata: baseMetadata,
+            provider: 'openai',
+            apiKey: 'test-api-key',
+            auditPath: '/tmp/audit.json',
+          }),
+        ).rejects.toThrow('LLM_REQUEST_FAILED')
+
+        const auditContent = JSON.parse(vi.mocked(fs.writeFile).mock.calls[0][1] as string)
+        expect(auditContent).toMatchObject({ llmCallCount: 1, status: 'failure', errorCode: 'LLM_REQUEST_FAILED' })
+        expect(JSON.stringify(auditContent)).not.toContain('secret upstream details')
+      })
+
+      it('retains aggregate statistics when a later LLM call fails', async () => {
+        vi.mocked(fs.readFile).mockResolvedValue('Release\n{{ llm "first" }}\n{{ llm "second" }}')
+        mockCreate
+          .mockResolvedValueOnce({ choices: [{ message: { content: '@team' } }] })
+          .mockRejectedValueOnce(new Error('second failed'))
+
+        await expect(
+          renderReleasePR({
+            templatePath: '/tmp/template.md',
+            metadata: baseMetadata,
+            provider: 'openai',
+            apiKey: 'test-api-key',
+            auditPath: '/tmp/audit.json',
+          }),
+        ).rejects.toThrow('LLM_REQUEST_FAILED')
+
+        const auditContent = JSON.parse(vi.mocked(fs.writeFile).mock.calls[0][1] as string)
+        expect(auditContent).toMatchObject({
+          llmCallCount: 2,
+          outputSanitizationCount: 1,
+          status: 'failure',
+          errorCode: 'LLM_REQUEST_FAILED',
+        })
+      })
+
+      it('fails closed with AUDIT_WRITE_FAILED and retains only the original stable code as cause', async () => {
+        vi.mocked(fs.readFile).mockResolvedValue(templateWithLLM)
+        mockCreate.mockRejectedValue(new Error('sensitive failure'))
+        vi.mocked(fs.writeFile).mockRejectedValue(new Error('audit storage details'))
+
+        const promise = renderReleasePR({
+          templatePath: '/tmp/template.md',
+          metadata: baseMetadata,
+          provider: 'openai',
+          apiKey: 'test-api-key',
+          auditPath: '/tmp/audit.json',
+        })
+        await expect(promise).rejects.toMatchObject({ message: 'AUDIT_WRITE_FAILED', cause: 'LLM_REQUEST_FAILED' })
+      })
+
+      it('discards a successful render when its audit log cannot be written', async () => {
+        vi.mocked(fs.readFile).mockResolvedValue(templateWithLLM)
+        mockCreate.mockResolvedValue({ choices: [{ message: { content: 'Summary' } }] })
+        vi.mocked(fs.writeFile).mockRejectedValue(new Error('audit storage details'))
+
+        const promise = renderReleasePR({
+          templatePath: '/tmp/template.md',
+          metadata: baseMetadata,
+          provider: 'openai',
+          apiKey: 'test-api-key',
+          auditPath: '/tmp/audit.json',
+        })
+        await expect(promise).rejects.toThrow('AUDIT_WRITE_FAILED')
+        await expect(promise).rejects.not.toHaveProperty('cause')
+      })
+    })
+
+    it('validates final rendered release content', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue('bad\u0000title\nbody')
+      await expect(
+        renderReleasePR({ templatePath: '/tmp/template.md', metadata: baseMetadata, provider: 'none' }),
+      ).rejects.toThrow('RELEASE_TITLE_INVALID_CHAR')
+    })
+
+    it('rejects an empty rendered title instead of substituting a default', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue('\nbody')
+      await expect(
+        renderReleasePR({ templatePath: '/tmp/template.md', metadata: baseMetadata, provider: 'none' }),
+      ).rejects.toThrow('RELEASE_TITLE_EMPTY')
+    })
+
+    it('preserves valid title and body whitespace', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue('  Release  \n body  ')
+      const result = await renderReleasePR({
+        templatePath: '/tmp/template.md',
+        metadata: baseMetadata,
+        provider: 'none',
+      })
+
+      expect(result).toEqual({ title: '  Release  ', body: ' body  ' })
     })
   })
 
@@ -535,11 +745,11 @@ describe('smart-pr-release-render', () => {
   })
 
   describe('run', () => {
-    const simpleTemplate = `Release <%= it.date %>
+    const simpleTemplate = `Release {{ date }}
 ## PRs
-<% for (const pr of it.pullRequests) { %>
-- #<%= pr.number %>
-<% } %>`
+{{#pullRequests}}
+- #{{ number }}
+{{/pullRequests}}`
 
     const baseMetadataJson = JSON.stringify({
       generatedAt: '2024-01-15T10:00:00Z',
@@ -611,6 +821,27 @@ describe('smart-pr-release-render', () => {
 
       expect(mockDeps.core.setOutput).toHaveBeenCalledWith('title', expect.stringContaining('Release'))
       expect(mockDeps.core.setOutput).toHaveBeenCalledWith('body', expect.stringContaining('#1'))
+    })
+
+    it('writes the rendered result to a private transfer file', async () => {
+      const mockContext = createMockContext({
+        env: {
+          RELEASE_TEMPLATE_PATH: '/tmp/template.md',
+          RELEASE_METADATA_PATH: '/tmp/metadata.json',
+          RELEASE_RESULT_PATH: '/runner/temp/render/result.json',
+        },
+      })
+      const mockDeps = createMockDeps()
+
+      await run(mockContext, mockDeps)
+
+      expect(mockDeps.fs.mkdir).toHaveBeenCalledWith('/runner/temp/render', { recursive: true, mode: 0o700 })
+      expect(mockDeps.fs.writeFile).toHaveBeenCalledWith(
+        '/runner/temp/render/result.json',
+        expect.stringContaining('"title"'),
+        { encoding: 'utf8', mode: 0o600 },
+      )
+      expect(mockDeps.core.setOutput).toHaveBeenCalledWith('result_path', '/runner/temp/render/result.json')
     })
 
     it('uses default paths when not specified', async () => {
@@ -758,7 +989,7 @@ describe('smart-pr-release-render', () => {
       expect(mockDeps.fs.readFile).toHaveBeenCalledWith('.smart-pr-release/metadata.json', 'utf8')
     })
 
-    it('preserves absolute paths even when GITHUB_WORKSPACE is set', async () => {
+    it('rejects an absolute template path outside GITHUB_WORKSPACE', async () => {
       const mockContext = createMockContext({
         env: {
           GITHUB_WORKSPACE: '/workspace/caller-repo',
@@ -770,12 +1001,26 @@ describe('smart-pr-release-render', () => {
 
       await run(mockContext, mockDeps)
 
-      // Verify absolute paths are preserved (not prefixed with GITHUB_WORKSPACE)
-      expect(mockDeps.core.info).toHaveBeenCalledWith('Template path: /absolute/path/template.md')
-      expect(mockDeps.core.info).toHaveBeenCalledWith('Metadata path: /absolute/path/metadata.json')
+      expect(mockDeps.core.setFailed).toHaveBeenCalledWith('Template path must resolve within GITHUB_WORKSPACE.')
+      expect(mockDeps.fs.readFile).not.toHaveBeenCalled()
+    })
 
-      // Verify fs.readFile was called with the absolute metadata path
-      expect(mockDeps.fs.readFile).toHaveBeenCalledWith('/absolute/path/metadata.json', 'utf8')
+    it('rejects a template symlink that resolves outside GITHUB_WORKSPACE', async () => {
+      const mockContext = createMockContext({
+        env: {
+          GITHUB_WORKSPACE: '/workspace/caller-repo',
+          RELEASE_TEMPLATE_PATH: '.github/release-template.md',
+        },
+      })
+      vi.mocked(fs.realpath).mockImplementation(async (filePath) =>
+        String(filePath).endsWith('release-template.md') ? '/proc/123/environ' : String(filePath),
+      )
+      const mockDeps = createMockDeps()
+
+      await run(mockContext, mockDeps)
+
+      expect(mockDeps.core.setFailed).toHaveBeenCalledWith('Template path must resolve within GITHUB_WORKSPACE.')
+      expect(mockDeps.fs.readFile).not.toHaveBeenCalled()
     })
   })
 })

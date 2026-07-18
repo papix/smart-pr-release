@@ -7,7 +7,7 @@
   "author": "papix",
   "repository": {
     "type": "git",
-    "url": "https://github.com/papix/smart-pr-release.git",
+    "url": "git+https://github.com/papix/smart-pr-release.git",
     "directory": "packages/cli"
   },
   "homepage": "https://github.com/papix/smart-pr-release/tree/main/packages/cli",
@@ -15,7 +15,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.13.0"
   },
   "keywords": [
     "release",
@@ -29,7 +29,9 @@
   "bin": {
     "smart-pr-release": "./dist/index.js"
   },
-  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "sideEffects": false,
   "files": [
     "dist"
@@ -39,7 +41,7 @@
     "build": "tsup"
   },
   "dependencies": {
-    "commander": "^13.1.0",
-    "dotenv": "^16.5.0"
+    "commander": "^15.0.0",
+    "dotenv": "^17.4.2"
   }
 }

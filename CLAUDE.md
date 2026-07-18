@@ -33,7 +33,7 @@ pnpm run knip
 
 # Run CLI
 pnpm run cli -- --help
-pnpm run cli -- --repo owner/repo --provider openai
+pnpm run cli -- --repo owner/repo --template .github/release-template.md --provider openai
 ```
 
 ## Architecture
@@ -51,7 +51,7 @@ packages/
 │       ├── errors.ts          # Custom error types (SmartPrReleaseError, GitHubApiError)
 │       ├── github-api.ts      # GitHub API client with caching
 │       ├── mask-sensitive.ts  # Sensitive info masking for LLM
-│       └── template.ts        # Eta template rendering
+│       └── template.ts        # Restricted template rendering
 └── cli/            # CLI tool (@papix/smart-pr-release-cli)
     └── src/
         ├── index.ts           # Commander.js based CLI entry

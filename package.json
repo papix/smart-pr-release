@@ -8,7 +8,7 @@
   "author": "papix",
   "packageManager": "pnpm@11.13.1",
   "engines": {
-    "node": ">=22.13.0",
+    "node": ">=22.22.1",
     "pnpm": ">=11.13.1"
   },
   "repository": {
@@ -53,21 +53,20 @@
     "@commitlint/config-conventional": "^21.2.0",
     "@commitlint/types": "^21.2.0",
     "@secretlint/secretlint-rule-preset-recommend": "^13.0.2",
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.0.18",
     "dayjs": "^1.11.13",
     "husky": "^9.1.7",
     "knip": "6.27.0",
-    "lint-staged": "^17.0.8",
+    "lint-staged": "^17.1.0",
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-to-markdown": "2.1.2",
-    "openai": "6.47.0",
+    "openai": "6.48.0",
     "publint": "^0.3.12",
     "secretlint": "^13.0.2",
     "tsup": "^8.5.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.9.3",
-    "vite-tsconfig-paths": "^6.0.5",
+    "typescript": "^7.0.2",
     "vitest": "^4.0.18"
   }
 }

@@ -21,7 +21,6 @@
     "noUncheckedIndexedAccess": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
-    "baseUrl": ".",
     "paths": {
       "#core/*": ["./packages/core/src/*"],
       "@actions/*": ["./actions/*"]

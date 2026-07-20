@@ -31,7 +31,7 @@ Please be respectful and constructive in all interactions. We aim to maintain a 
 
 ### Prerequisites
 
-- **Node.js**: v24.18.0 for development (v22.13.0 is the supported minimum)
+- **Node.js**: v24.18.0 for development (v22.22.1 is the supported minimum)
 - **pnpm**: v11.13.1 or later
 
 ### Installation

@@ -4,6 +4,9 @@ import test from 'node:test'
 
 const workflow = await readFile(new URL('../.github/workflows/smart-pr-release.yml', import.meta.url), 'utf8')
 const ciWorkflow = await readFile(new URL('../.github/workflows/ci-reusable.yml', import.meta.url), 'utf8')
+const rootPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+const corePackage = JSON.parse(await readFile(new URL('../packages/core/package.json', import.meta.url), 'utf8'))
+const cliPackage = JSON.parse(await readFile(new URL('../packages/cli/package.json', import.meta.url), 'utf8'))
 
 function getJob(name) {
   const marker = `  ${name}:\n`
@@ -79,8 +82,8 @@ for (const jobName of ['render', 'create']) {
 test('keeps caller-controlled rendering in a read-only job', () => {
   const renderJob = getJob('render')
 
-  assert.match(renderJob, /^\s+pull-requests: read\s*$/m)
-  assert.doesNotMatch(renderJob, /^\s+(?:pull-requests|issues|contents): write\s*$/m)
+  assert.match(renderJob, /^\s+pull-requests: read(?:\s+#.*)?\s*$/m)
+  assert.doesNotMatch(renderJob, /^\s+(?:pull-requests|issues|contents): write(?:\s+#.*)?\s*$/m)
   assert.doesNotMatch(renderJob, /Create or Update Release PR/)
 })
 
@@ -95,10 +98,10 @@ test('transfers rendered data as an artifact to a fresh write-capable job', () =
     renderStep,
     /^\s+result_path: \$\{\{ runner\.temp \}\}\/smart-pr-release-render\/render-result\.json\s*$/m,
   )
-  assert.match(uploadStep, /actions\/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f/)
+  assert.match(uploadStep, /actions\/upload-artifact@[0-9a-f]{40}/)
   assert.match(createJob, /^\s+needs: render\s*$/m)
-  assert.match(createJob, /^\s+pull-requests: write\s*$/m)
-  assert.match(downloadStep, /actions\/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131/)
+  assert.match(createJob, /^\s+pull-requests: write(?:\s+#.*)?\s*$/m)
+  assert.match(downloadStep, /actions\/download-artifact@[0-9a-f]{40}/)
   assert.match(
     createStep,
     /^\s+result_path: \$\{\{ runner\.temp \}\}\/smart-pr-release-render\/render-result\.json\s*$/m,
@@ -122,4 +125,16 @@ test('runs actionlint without requiring pull request write permissions', () => {
   assert.match(actionlintStep, /^\s+filter_mode: nofilter\s*$/m)
   assert.doesNotMatch(actionlintStep, /^\s+reporter: github-pr-review\s*$/m)
   assert.doesNotMatch(lintJob, /^\s+permissions:/m)
+})
+
+test('tests the published Node.js minimum consistently', () => {
+  const minimumNodeVersion = '22.22.1'
+  const compatibilityJob = getCiJob('node-minimum-compatibility')
+  const setupNodeStep = getCiStep('node-minimum-compatibility', 'Setup Node.js')
+
+  assert.equal(rootPackage.engines.node, `>=${minimumNodeVersion}`)
+  assert.equal(corePackage.engines.node, `>=${minimumNodeVersion}`)
+  assert.equal(cliPackage.engines.node, `>=${minimumNodeVersion}`)
+  assert.match(compatibilityJob, /^\s+name: Node\.js Minimum Version Compatibility\s*$/m)
+  assert.match(setupNodeStep, new RegExp(`^\\s+node-version: '${minimumNodeVersion}'\\s*$`, 'm'))
 })

@@ -15,7 +15,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.22.1"
   },
   "keywords": [
     "release",
@@ -57,7 +57,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup"
+    "build": "tsup && tsc --project tsconfig.build.json"
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1"

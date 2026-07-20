@@ -12,7 +12,7 @@ This monorepo contains:
 | [@papix/smart-pr-release-cli](./packages/cli) | CLI tool |
 | [GitHub Actions](./actions) | Reusable GitHub Actions |
 
-The published CLI and core package require Node.js 22.13.0 or later. Development uses Node.js 24.18.0 and pnpm 11.13.1, pinned by `.node-version` and `packageManager`.
+The published CLI and core package require Node.js 22.22.1 or later. Development uses Node.js 24.18.0 and pnpm 11.13.1, pinned by `.node-version` and `packageManager`.
 
 ## Features
 

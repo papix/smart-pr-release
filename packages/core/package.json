@@ -15,7 +15,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.22.1"
   },
   "keywords": [
     "release",

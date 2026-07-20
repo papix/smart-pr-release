@@ -192,8 +192,8 @@ jobs:
       - name: Run attw (core only)
         run: pnpm run attw
 
-  node-22-compatibility:
-    name: Node.js 22.13 Compatibility
+  node-minimum-compatibility:
+    name: Node.js Minimum Version Compatibility
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -211,7 +211,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22.13.0'
+          node-version: '22.22.1'
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
 

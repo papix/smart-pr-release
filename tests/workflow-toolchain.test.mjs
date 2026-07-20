@@ -4,6 +4,9 @@ import test from 'node:test'
 
 const workflow = await readFile(new URL('../.github/workflows/smart-pr-release.yml', import.meta.url), 'utf8')
 const ciWorkflow = await readFile(new URL('../.github/workflows/ci-reusable.yml', import.meta.url), 'utf8')
+const rootPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+const corePackage = JSON.parse(await readFile(new URL('../packages/core/package.json', import.meta.url), 'utf8'))
+const cliPackage = JSON.parse(await readFile(new URL('../packages/cli/package.json', import.meta.url), 'utf8'))
 
 function getJob(name) {
   const marker = `  ${name}:\n`
@@ -122,4 +125,16 @@ test('runs actionlint without requiring pull request write permissions', () => {
   assert.match(actionlintStep, /^\s+filter_mode: nofilter\s*$/m)
   assert.doesNotMatch(actionlintStep, /^\s+reporter: github-pr-review\s*$/m)
   assert.doesNotMatch(lintJob, /^\s+permissions:/m)
+})
+
+test('tests the published Node.js minimum consistently', () => {
+  const minimumNodeVersion = '22.22.1'
+  const compatibilityJob = getCiJob('node-minimum-compatibility')
+  const setupNodeStep = getCiStep('node-minimum-compatibility', 'Setup Node.js')
+
+  assert.equal(rootPackage.engines.node, `>=${minimumNodeVersion}`)
+  assert.equal(corePackage.engines.node, `>=${minimumNodeVersion}`)
+  assert.equal(cliPackage.engines.node, `>=${minimumNodeVersion}`)
+  assert.match(compatibilityJob, /^\s+name: Node\.js Minimum Version Compatibility\s*$/m)
+  assert.match(setupNodeStep, new RegExp(`^\\s+node-version: '${minimumNodeVersion}'\\s*$`, 'm'))
 })

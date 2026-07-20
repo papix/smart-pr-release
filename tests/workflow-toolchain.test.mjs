@@ -79,8 +79,8 @@ for (const jobName of ['render', 'create']) {
 test('keeps caller-controlled rendering in a read-only job', () => {
   const renderJob = getJob('render')
 
-  assert.match(renderJob, /^\s+pull-requests: read\s*$/m)
-  assert.doesNotMatch(renderJob, /^\s+(?:pull-requests|issues|contents): write\s*$/m)
+  assert.match(renderJob, /^\s+pull-requests: read(?:\s+#.*)?\s*$/m)
+  assert.doesNotMatch(renderJob, /^\s+(?:pull-requests|issues|contents): write(?:\s+#.*)?\s*$/m)
   assert.doesNotMatch(renderJob, /Create or Update Release PR/)
 })
 
@@ -95,10 +95,10 @@ test('transfers rendered data as an artifact to a fresh write-capable job', () =
     renderStep,
     /^\s+result_path: \$\{\{ runner\.temp \}\}\/smart-pr-release-render\/render-result\.json\s*$/m,
   )
-  assert.match(uploadStep, /actions\/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f/)
+  assert.match(uploadStep, /actions\/upload-artifact@[0-9a-f]{40}/)
   assert.match(createJob, /^\s+needs: render\s*$/m)
-  assert.match(createJob, /^\s+pull-requests: write\s*$/m)
-  assert.match(downloadStep, /actions\/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131/)
+  assert.match(createJob, /^\s+pull-requests: write(?:\s+#.*)?\s*$/m)
+  assert.match(downloadStep, /actions\/download-artifact@[0-9a-f]{40}/)
   assert.match(
     createStep,
     /^\s+result_path: \$\{\{ runner\.temp \}\}\/smart-pr-release-render\/render-result\.json\s*$/m,

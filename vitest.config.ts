@@ -1,13 +1,16 @@
 import { fileURLToPath } from 'node:url'
-import tsconfigPaths from 'vite-tsconfig-paths'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
-  plugins: [tsconfigPaths()],
   resolve: {
     alias: {
       // Required for using path aliases with vi.mock
       '#core': fileURLToPath(new URL('./packages/core/src', import.meta.url)),
+      '@actions/smart-pr-release-collect': fileURLToPath(
+        new URL('./actions/smart-pr-release-collect', import.meta.url),
+      ),
+      '@actions/smart-pr-release-create': fileURLToPath(new URL('./actions/smart-pr-release-create', import.meta.url)),
+      '@actions/smart-pr-release-render': fileURLToPath(new URL('./actions/smart-pr-release-render', import.meta.url)),
     },
   },
   test: {

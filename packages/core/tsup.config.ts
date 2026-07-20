@@ -10,7 +10,6 @@ export default defineConfig({
     'src/cli-types.ts',
   ],
   format: ['esm'],
-  dts: true,
   target: 'node22',
   platform: 'node',
   clean: true,

@@ -57,7 +57,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup"
+    "build": "tsup && tsc --project tsconfig.build.json"
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1"

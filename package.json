@@ -61,7 +61,7 @@
     "lint-staged": "^17.0.8",
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-to-markdown": "2.1.2",
-    "openai": "6.47.0",
+    "openai": "6.48.0",
     "publint": "^0.3.12",
     "secretlint": "^13.0.2",
     "tsup": "^8.5.0",

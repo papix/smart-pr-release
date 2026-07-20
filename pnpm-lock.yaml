@@ -58,8 +58,8 @@ importers:
         specifier: 2.1.2
         version: 2.1.2
       openai:
-        specifier: 6.47.0
-        version: 6.47.0(zod@4.4.3)
+        specifier: 6.48.0
+        version: 6.48.0(zod@4.4.3)
       publint:
         specifier: ^0.3.12
         version: 0.3.21
@@ -1668,8 +1668,8 @@ packages:
     resolution: {integrity: sha512-VXJjc87FScF88uafS3JllDgvAm+c/Slfz06lorj2uAY34rlUu0Nt+v8wreiImcrgAjjIHp1rXpTDlLOGw29WwQ==}
     engines: {node: '>=18'}
 
-  openai@6.47.0:
-    resolution: {integrity: sha512-xYr+R9woSzWxVxeiqkkNbHhv89tZDEI6eBMbrdPnv3poh+mijHvbhS35a+3o6xHa411/ns8j5ENY3So9DCXWYw==}
+  openai@6.48.0:
+    resolution: {integrity: sha512-KhVp+FyV50QrXNextvL9hIU5l6ox5HYuKQjGVk7lIqprgJol90+dQXWONV6S1lRWsKA1bXjrow8RsUT14M1hNA==}
     peerDependencies:
       '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
       '@smithy/hash-node': '>=4.3.0 <5'
@@ -3717,7 +3717,7 @@ snapshots:
     dependencies:
       mimic-function: 5.0.1
 
-  openai@6.47.0(zod@4.4.3):
+  openai@6.48.0(zod@4.4.3):
     optionalDependencies:
       zod: 4.4.3
 

@@ -35,6 +35,10 @@ on:
         description: 'Path to release template (in caller repo)'
         type: string
         default: '.github/release-template.md'
+      runs_on:
+        description: 'Runner label used by the render and create jobs'
+        type: string
+        default: 'ubuntu-latest'
     secrets:
       OPENAI_API_KEY:
         required: false
@@ -59,7 +63,7 @@ concurrency:
 jobs:
   render:
     name: Collect and render release PR
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 30
     outputs:
       existing_pr_number: ${{ steps.collect.outputs.existing_pr_number }}
@@ -152,7 +156,7 @@ jobs:
   create:
     name: Create or update release PR
     needs: render
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 30
     outputs:
       pr_number: ${{ steps.create.outputs.pr_number }}

@@ -88,6 +88,9 @@ jobs:
 
       # Path to custom template
       template_path: '.github/release-template.md'
+
+      # Runner label for both jobs
+      runs_on: 'toggle-ci-runner-local-cache' # Default: 'ubuntu-latest'
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```

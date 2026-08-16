@@ -49,6 +49,12 @@ function getCiStep(jobName, stepName) {
 }
 
 for (const jobName of ['render', 'create']) {
+  test(`${jobName} uses the caller-selected runner`, () => {
+    const job = getJob(jobName)
+
+    assert.match(job, /^\s+runs-on: \$\{\{ inputs\.runs_on \}\}\s*$/m)
+  })
+
   test(`${jobName} checks out the reusable workflow repository at the invoked commit`, () => {
     const step = getStep(jobName, 'Checkout smart-pr-release')
 
@@ -78,6 +84,13 @@ for (const jobName of ['render', 'create']) {
     assert.match(step, /test "\$\(pnpm --version\)" = "11\.13\.1"/)
   })
 }
+
+test('defaults the reusable workflow runner to ubuntu-latest', () => {
+  assert.match(
+    workflow,
+    /^\s+runs_on:\n\s+description: 'Runner label used by the render and create jobs'\n\s+type: string\n\s+default: 'ubuntu-latest'\s*$/m,
+  )
+})
 
 test('keeps caller-controlled rendering in a read-only job', () => {
   const renderJob = getJob('render')

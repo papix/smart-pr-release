@@ -2,6 +2,7 @@
 # Reference: https://github.com/rhysd/actionlint/blob/main/docs/config.md
 
 self-hosted-runner:
-  labels: []
+  labels:
+    - toggle-ci-runner-local-cache
 
 config-variables: []

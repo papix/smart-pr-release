@@ -95,6 +95,9 @@ jobs:
           cache-dependency-path: .smart-pr-release-action/pnpm-lock.yaml
 
       - name: Verify toolchain versions
+        # Run inside the checked-out action so pnpm resolves this repository's packageManager,
+        # not the caller's. pnpm switches to the version pinned by the current directory.
+        working-directory: .smart-pr-release-action
         run: |
           node --version
           pnpm --version
@@ -190,6 +193,9 @@ jobs:
           cache-dependency-path: .smart-pr-release-action/pnpm-lock.yaml
 
       - name: Verify toolchain versions
+        # Run inside the checked-out action so pnpm resolves this repository's packageManager,
+        # not the caller's. pnpm switches to the version pinned by the current directory.
+        working-directory: .smart-pr-release-action
         run: |
           node --version
           pnpm --version

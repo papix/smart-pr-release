@@ -76,6 +76,8 @@ for (const jobName of ['render', 'create']) {
 
     assert.match(step, /test "\$\(node --version\)" = "v24\.18\.0"/)
     assert.match(step, /test "\$\(pnpm --version\)" = "11\.13\.1"/)
+    // pnpm switches to the caller's packageManager when run from the caller's checkout.
+    assert.match(step, /^\s+working-directory: \.smart-pr-release-action\s*$/m)
   })
 }
 
